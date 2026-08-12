@@ -110,6 +110,13 @@ func UserFrom(ctx context.Context) (*User, bool) {
 	return u, ok
 }
 
+// ContextWithUser returns a new context with the user attached.
+// Used by tests and by handlers that need to set the user
+// without going through the middleware.
+func ContextWithUser(ctx context.Context, u *User) context.Context {
+	return context.WithValue(ctx, userKey{}, u)
+}
+
 // SessionFrom returns the session attached by the middleware, if any.
 func SessionFrom(ctx context.Context) (*Session, bool) {
 	s, ok := ctx.Value(sessionKey{}).(*Session)

@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { session } from '$lib/stores';
 	import { resolve } from '$app/paths';
 
 	let status: 'checking' | 'ok' | 'down' = $state('checking');
 	let version: string | null = $state(null);
+	let menuOpen = $state(false);
 
 	onMount(async () => {
 		try {
@@ -27,15 +29,26 @@
 			/* version is best-effort */
 		}
 	});
+
+	function toggleMenu() {
+		menuOpen = !menuOpen;
+	}
+
+	async function signOut() {
+		menuOpen = false;
+		await session.logout();
+	}
 </script>
 
 <header class="bar">
 	<div class="brand">
-		<span class="logo" aria-hidden="true"></span>
-		<span class="name">DockPulse</span>
+		<a href={resolve('/')} class="brand-link">
+			<span class="logo" aria-hidden="true"></span>
+			<span class="name">DockPulse</span>
+		</a>
 	</div>
 	<nav class="nav" aria-label="primary">
-		<a href={resolve('/')} aria-current="page">Dashboard</a>
+		<a href={resolve('/')}>Dashboard</a>
 		<a href={resolve('/servers')}>Servers</a>
 		<a href={resolve('/containers')}>Containers</a>
 		<a href={resolve('/updates')}>Updates</a>
@@ -49,6 +62,25 @@
 		{#if version}
 			<span class="version" title="DockPulse version">v{version}</span>
 		{/if}
+		{#if $session.user}
+			<div class="user">
+				<button class="user-btn" onclick={toggleMenu} aria-haspopup="menu" aria-expanded={menuOpen}>
+					{$session.user.username}
+					<span class="caret" aria-hidden="true">▾</span>
+				</button>
+				{#if menuOpen}
+					<div class="menu" role="menu">
+						<div class="menu-meta">
+							<div class="menu-name">{$session.user.username}</div>
+							<div class="menu-role">{$session.user.role}</div>
+						</div>
+						<button class="menu-item" role="menuitem" onclick={signOut}>Sign out</button>
+					</div>
+				{/if}
+			</div>
+		{:else}
+			<a class="sign-in" href={resolve('/login')}>Sign in</a>
+		{/if}
 	</div>
 </header>
 
@@ -61,13 +93,17 @@
 		border-bottom: 1px solid var(--border);
 		background: var(--bg-1);
 		backdrop-filter: saturate(140%);
+		position: relative;
+		z-index: 10;
 	}
-	.brand {
+	.brand-link {
 		display: flex;
 		align-items: center;
 		gap: 0.6rem;
 		font-weight: 600;
 		letter-spacing: -0.01em;
+		text-decoration: none;
+		color: inherit;
 	}
 	.logo {
 		width: 22px;
@@ -91,10 +127,6 @@
 		transition: background-color 180ms ease, color 180ms ease;
 	}
 	.nav a:hover {
-		color: var(--fg-0);
-		background: var(--bg-2);
-	}
-	.nav a[aria-current='page'] {
 		color: var(--fg-0);
 		background: var(--bg-2);
 	}
@@ -127,5 +159,75 @@
 		font-family: var(--font-mono);
 		color: var(--fg-1);
 		opacity: 0.7;
+	}
+	.user {
+		position: relative;
+	}
+	.user-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.35rem 0.55rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--bg-2);
+		color: var(--fg-0);
+		font: inherit;
+		cursor: pointer;
+	}
+	.user-btn:hover {
+		background: var(--bg-1);
+	}
+	.caret {
+		font-size: 0.7em;
+		opacity: 0.7;
+	}
+	.menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		min-width: 200px;
+		background: var(--bg-1);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-md);
+		box-shadow: var(--shadow-md);
+		padding: 0.4rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+	.menu-meta {
+		padding: 0.5rem 0.6rem;
+		border-bottom: 1px solid var(--border);
+		margin-bottom: 0.2rem;
+	}
+	.menu-name {
+		font-weight: 600;
+	}
+	.menu-role {
+		font-size: 0.75rem;
+		color: var(--fg-1);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.menu-item {
+		text-align: left;
+		padding: 0.45rem 0.6rem;
+		border-radius: var(--radius-sm);
+		background: transparent;
+		border: 0;
+		color: var(--fg-0);
+		cursor: pointer;
+	}
+	.menu-item:hover {
+		background: var(--bg-2);
+	}
+	.sign-in {
+		text-decoration: none;
+		padding: 0.35rem 0.55rem;
+		border-radius: var(--radius-sm);
+		background: var(--accent-grad);
+		color: #0b0f17;
+		font-weight: 600;
 	}
 </style>

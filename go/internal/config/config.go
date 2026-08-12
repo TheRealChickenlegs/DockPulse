@@ -42,6 +42,7 @@ type Controller struct {
 	StaticFS       string   // directory served for /static/* when not using embed
 	TrustedProxies []string // CIDR/IPs allowed to set X-Forwarded-For; empty disables trust
 	CookieSecure   bool     // set Secure flag on session cookies (require TLS)
+	AgentCADir     string   // directory holding the agent CA cert/key (created on first run)
 }
 
 // Agent holds configuration specific to agent mode.
@@ -70,8 +71,8 @@ func (c Common) String() string {
 // and are not useful in logs. TrustedProxies is summarised by count
 // only so individual entries don't leak the operator's network shape.
 func (c Controller) String() string {
-	return fmt.Sprintf("%s listen=%s db=%s web=%s static=%s trusted_proxies=%d cookie_secure=%t",
-		c.Common, c.Listen, redactPath(c.DBPath), redactPath(c.WebPath), c.StaticFS, len(c.TrustedProxies), c.CookieSecure)
+	return fmt.Sprintf("%s listen=%s db=%s web=%s static=%s trusted_proxies=%d cookie_secure=%t ca_dir=%s",
+		c.Common, c.Listen, redactPath(c.DBPath), redactPath(c.WebPath), c.StaticFS, len(c.TrustedProxies), c.CookieSecure, redactPath(c.AgentCADir))
 }
 
 // String implements fmt.Stringer for log output without leaking secrets.
@@ -121,6 +122,9 @@ func Load(args []string) (any, error) {
 		"Comma-separated list of reverse-proxy IPs/CIDRs allowed to set X-Forwarded-For (controller mode). Empty disables trust.")
 	cookieSecure := fs.Bool("secure-cookies", envBool("DOCKPULSE_COOKIE_SECURE", false),
 		"Set the Secure attribute on session cookies (controller mode). Required in production behind TLS.")
+	agentCADir := fs.String("agent-ca-dir",
+		firstNonEmpty(os.Getenv("DOCKPULSE_AGENT_CA_DIR"), filepath.Join(filepath.Dir(*dbPath), "agent-ca")),
+		"Directory holding the agent CA cert and key (controller mode). Created on first run.")
 
 	// Agent-only
 	name := fs.String("name", "", "Friendly name for this agent host (agent mode)")
@@ -152,6 +156,7 @@ func Load(args []string) (any, error) {
 			StaticFS:       *staticDir,
 			TrustedProxies: splitCSV(*trustedProxiesFlag),
 			CookieSecure:   *cookieSecure,
+			AgentCADir:     *agentCADir,
 		}, nil
 	case ModeAgent:
 		if *controllerURL == "" {
@@ -218,4 +223,13 @@ func envBool(key string, fallback bool) bool {
 	default:
 		return false
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

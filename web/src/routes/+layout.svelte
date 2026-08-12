@@ -1,8 +1,14 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
 	import AppHeader from '$components/AppHeader.svelte';
+	import { session } from '$lib/stores';
 
 	let { children } = $props();
+
+	onMount(() => {
+		session.refresh();
+	});
 </script>
 
 <AppHeader />

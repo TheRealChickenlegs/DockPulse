@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/agentapi"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/agentca"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/auth"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/version"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/web"
@@ -31,13 +33,15 @@ import (
 // Server is the controller's HTTP server. It is safe to call Start and
 // then Shutdown to gracefully terminate.
 type Server struct {
-	cfg    config.Controller
-	router http.Handler
-	srv    *http.Server
-	bundle fs.FS
-	log    *slog.Logger
-	db     *sql.DB
-	authMw *auth.Middleware
+	cfg     config.Controller
+	router  http.Handler
+	srv     *http.Server
+	bundle  fs.FS
+	log     *slog.Logger
+	db      *sql.DB
+	authMw  *auth.Middleware
+	ca      *agentca.CA
+	agentAPI *agentapi.Server
 }
 
 // New constructs a Server using the supplied controller configuration.
@@ -55,13 +59,15 @@ func New(cfg config.Controller, database *sql.DB) (*Server, error) {
 		return nil, errors.New("controller: nil database handle")
 	}
 
-	// Cookies carry the Secure flag whenever the operator indicates
-	// the controller is behind a TLS terminator. We treat
-	// --secure-cookies as the explicit signal; the bundled Caddyfile
-	// and any sane reverse proxy will set the X-Forwarded-Proto
-	// header but we don't trust it for cookie flags because an
-	// operator who wants Secure cookies in production must opt in.
 	cookieSecure := cfg.CookieSecure
+
+	ca, err := agentca.LoadOrCreate(cfg.AgentCADir)
+	if err != nil {
+		return nil, fmt.Errorf("load agent CA: %w", err)
+	}
+	logger.Info("agent CA loaded", "fingerprint", ca.Fingerprint()[:16]+"…", "dir", cfg.AgentCADir)
+
+	apiSrv := agentapi.New(database, ca, logger)
 
 	s := &Server{
 		cfg:      cfg,
@@ -69,6 +75,8 @@ func New(cfg config.Controller, database *sql.DB) (*Server, error) {
 		log:      logger,
 		db:       database,
 		authMw:   auth.NewMiddleware(database, cookieSecure),
+		ca:       ca,
+		agentAPI: apiSrv,
 	}
 	s.router = s.buildRouter()
 	return s, nil
@@ -136,12 +144,23 @@ func (s *Server) buildRouter() http.Handler {
 		r.Post("/login", auth.HandleLogin(s.dbCtx(), s.db, s.cfg.CookieSecure))
 	})
 
-	// Authenticated auth endpoints.
+	// Authenticated auth + admin endpoints.
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMw.Wrap)
 		r.Post("/api/v1/logout", auth.HandleLogout(s.dbCtx(), s.db, s.cfg.CookieSecure))
 		r.Get("/api/v1/me", auth.HandleMe(s.dbCtx(), s.db))
+		r.Get("/api/v1/servers", agentapi.HandleListServers(s.dbCtx(), s.db))
+		r.Get("/api/v1/servers/{id}/containers", agentapi.HandleListContainers(s.dbCtx(), s.db))
+		r.Post("/api/v1/admin/agents/enroll-token", agentapi.HandleCreateEnrollmentToken(s.dbCtx(), s.db, s.ca.Fingerprint()))
 	})
+
+	// Agent API (mTLS-protected, served on the same port; in
+	// production an operator can put a separate listener on a
+	// different port if they prefer to keep the agent traffic
+	// off the public reverse proxy).
+	agentHandler := http.NewServeMux()
+	s.agentAPI.Routes(agentHandler)
+	r.Mount("/agent/v1", agentHandler)
 
 	// Static UI mount.
 	r.Handle("/static/*", s.staticHandler())
