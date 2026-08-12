@@ -40,6 +40,7 @@ jobs:
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
       - name: Build and push multi-arch images
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -62,9 +63,14 @@ jobs:
       - name: Sign images with cosign
         env:
           COSIGN_EXPERIMENTAL: '1'
+        # Sign by digest, not by tag, so we never sign a tag that
+        # the registry hasn't yet propagated. The published tags
+        # (version, latest) all point to the same digest so a single
+        # signature covers all of them.
         run: |
-          cosign sign --yes ghcr.io/therealchickenlegs/dockpulse@${{ steps.meta.outputs.version }}
-          cosign sign --yes ghcr.io/therealchickenlegs/dockpulse:latest
+          DIGEST="${{ steps.build.outputs.digest }}"
+          echo "Signing digest ${DIGEST}"
+          cosign sign --yes "ghcr.io/therealchickenlegs/dockpulse@${DIGEST}"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3

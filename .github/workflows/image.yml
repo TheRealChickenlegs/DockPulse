@@ -61,6 +61,7 @@ jobs:
           fi
 
       - name: Build (and push) multi-arch image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -85,7 +86,11 @@ jobs:
         if: steps.meta.outputs.push == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           COSIGN_EXPERIMENTAL: '1'
+        # Sign by digest so we never sign a tag that the registry
+        # hasn't yet propagated. The published tags (edge, edge-<sha>,
+        # main-<sha>) all point to the same digest so a single
+        # signature covers all of them.
         run: |
-          cosign sign --yes ghcr.io/therealchickenlegs/dockpulse:edge
-          cosign sign --yes ghcr.io/therealchickenlegs/dockpulse:edge-${SHORT_SHA}
-          cosign sign --yes ghcr.io/therealchickenlegs/dockpulse:main-${SHORT_SHA}
+          DIGEST="${{ steps.build.outputs.digest }}"
+          echo "Signing digest ${DIGEST}"
+          cosign sign --yes "ghcr.io/therealchickenlegs/dockpulse@${DIGEST}"
