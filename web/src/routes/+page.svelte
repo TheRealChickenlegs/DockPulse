@@ -54,7 +54,7 @@
 	</p>
 	<div class="cta-row">
 		<a class="cta primary" href={resolve('/servers')}>Browse servers</a>
-		<a class="cta" href={resolve('https://github.com/TheRealChickenlegs/DockPulse')} rel="noopener noreferrer">
+		<a class="cta" href="https://github.com/TheRealChickenlegs/DockPulse" rel="noopener noreferrer">
 			Read the docs
 		</a>
 	</div>

@@ -10,7 +10,7 @@
 # The resulting image contains a single static binary that runs in
 # either controller or agent mode.
 
-ARG GO_VERSION=1.22
+ARG GO_VERSION=1.25
 ARG NODE_VERSION=20
 
 # --- Stage 1: web bundle ---------------------------------------------------
