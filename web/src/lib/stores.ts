@@ -32,7 +32,7 @@ function createSessionStore() {
 				csrf: me.csrf_token,
 				firstRun: me.first_run_hint
 			});
-		} catch (err) {
+		} catch {
 			store.set({ ...initial, loaded: true });
 		}
 	}

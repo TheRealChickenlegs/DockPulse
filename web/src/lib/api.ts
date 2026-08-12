@@ -5,9 +5,12 @@
  */
 
 import { resolve } from '$app/paths';
-import { PUBLIC_CONTROLLER_BASE } from '$env/static/public';
 
-const base = PUBLIC_CONTROLLER_BASE || '';
+// The controller is served on the same origin as the SPA, so we
+// never need an absolute base URL here. If a future deployment
+// separates them, add a $env/static/public lookup and fall back
+// to a config-driven base.
+const base = '';
 
 export class ApiError extends Error {
 	status: number;
@@ -95,6 +98,30 @@ export interface FirstRunStatus {
 	needs_setup: boolean;
 }
 
+export interface ServerListItem {
+	id: string;
+	name: string;
+	hostname: string;
+	os: string;
+	docker_version: string;
+	status: 'pending' | 'online' | 'offline' | 'revoked';
+	last_seen_at?: string;
+	container_count: number;
+	running_count: number;
+}
+
+export interface ContainerListItem {
+	id: string;
+	docker_id: string;
+	name: string;
+	image_ref: string;
+	image_digest_local: string;
+	state: string;
+	started_at?: string;
+	server_id: string;
+	updated_at: string;
+}
+
 export const api = {
 	firstRunStatus: () => request<FirstRunStatus>('/api/v1/firstrun'),
 	firstRunCreate: (body: { username: string; password: string; email: string }) =>
@@ -102,7 +129,19 @@ export const api = {
 	login: (body: { username: string; password: string }) =>
 		request<{ user: User }>('/api/v1/login', { method: 'POST', body }),
 	logout: () => request<{ ok: boolean }>('/api/v1/logout', { method: 'POST', auth: true }),
-	me: () => request<MeResponse>('/api/v1/me')
+	me: () => request<MeResponse>('/api/v1/me'),
+	listServers: () => request<{ servers: ServerListItem[] }>('/api/v1/servers'),
+	listContainers: (serverId: string) =>
+		request<{ containers: ContainerListItem[] }>(
+			`/api/v1/servers/${encodeURIComponent(serverId)}/containers`
+		),
+	createEnrollmentToken: (body: { server_name: string; ttl_hours: number }) =>
+		request<{
+			token: string;
+			server_name: string;
+			expires_at: string;
+			ca_fingerprint: string;
+		}>('/api/v1/admin/agents/enroll-token', { method: 'POST', body, auth: true })
 };
 
 export const urls = {

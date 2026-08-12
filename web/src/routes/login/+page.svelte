@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { animateOn } from '$animations';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { api, ApiError } from '$lib/api';
 	import { session } from '$lib/stores';
 
@@ -13,22 +14,25 @@
 	let busy = $state(false);
 	let error: string | null = $state(null);
 
-	onMount(async () => {
-		try {
-			const status = await api.firstRunStatus();
-			if (status.needs_setup) {
-				mode = 'firstrun';
+	onMount(() => {
+		let unsub = () => {};
+		(async () => {
+			try {
+				const status = await api.firstRunStatus();
+				if (status.needs_setup) {
+					mode = 'firstrun';
+				}
+			} catch {
+				/* fall through to login mode */
 			}
-		} catch {
-			/* fall through to login mode */
-		}
-		await session.refresh();
-		const unsub = session.subscribe(($s) => {
+			await session.refresh();
+		})();
+		unsub = session.subscribe(($s) => {
 			if ($s.loaded && $s.user) {
-				goto('/');
+				goto(resolve('/'));
 			}
 		});
-		return unsub;
+		return () => unsub();
 	});
 
 	async function submit(event: SubmitEvent) {
