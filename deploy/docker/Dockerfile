@@ -14,10 +14,16 @@ ARG GO_VERSION=1.25
 ARG NODE_VERSION=20
 
 # --- Stage 1: web bundle ---------------------------------------------------
+#
+# The repo uses npm workspaces: web/ is the only workspace and the
+# lockfile lives at the repo root. We run `npm ci` from the root
+# so the workspace-aware resolver picks up the right deps for web/.
 FROM node:${NODE_VERSION}-alpine AS web
-WORKDIR /src/web
-COPY web/package.json web/package-lock.json* ./
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY web/package.json ./web/
 RUN npm ci --no-audit --no-fund
+WORKDIR /src/web
 COPY web/ ./
 RUN npm run build
 
