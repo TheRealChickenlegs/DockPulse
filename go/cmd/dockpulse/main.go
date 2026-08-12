@@ -22,6 +22,7 @@ import (
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/db"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/logging"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/version"
 )
@@ -50,7 +51,12 @@ func run(args []string) error {
 	switch c := cfg.(type) {
 	case config.Controller:
 		slog.Info("loaded controller config", "cfg", c.String())
-		srv, err := controller.New(c)
+		sqlDB, err := db.Open(ctx, c.DBPath)
+		if err != nil {
+			return fmt.Errorf("open database: %w", err)
+		}
+		defer func() { _ = sqlDB.Close() }()
+		srv, err := controller.New(c, sqlDB)
 		if err != nil {
 			return err
 		}

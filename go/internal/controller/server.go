@@ -1,13 +1,15 @@
 // Package controller hosts the web UI, the agent-facing API, and the
 // database. It is the default DockPulse process when --mode is omitted.
 //
-// In Phase 0 this package only sets up an HTTP server, the health
-// endpoint, and the static UI mount. Phase 1 adds authentication, the
-// database driver, and the agent API.
+// Phase 1 adds the SQLite database, the first-run admin wizard, the
+// session-based authentication layer, and the public /api/v1/* surface
+// for the SvelteKit SPA. The agent API and the registry polling
+// pipeline are added in later phases.
 package controller
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/auth"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/version"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/web"
 
@@ -33,10 +36,14 @@ type Server struct {
 	srv    *http.Server
 	bundle fs.FS
 	log    *slog.Logger
+	db     *sql.DB
+	authMw *auth.Middleware
 }
 
 // New constructs a Server using the supplied controller configuration.
-func New(cfg config.Controller) (*Server, error) {
+// The db handle is used for the session store; the caller is
+// responsible for opening it (and closing it on shutdown).
+func New(cfg config.Controller, database *sql.DB) (*Server, error) {
 	logger := slog.Default().With("subsystem", "controller")
 
 	bundle, err := resolveBundle(cfg, logger)
@@ -44,10 +51,24 @@ func New(cfg config.Controller) (*Server, error) {
 		return nil, fmt.Errorf("resolve web bundle: %w", err)
 	}
 
+	if database == nil {
+		return nil, errors.New("controller: nil database handle")
+	}
+
+	// Cookies carry the Secure flag whenever the operator indicates
+	// the controller is behind a TLS terminator. We treat
+	// --secure-cookies as the explicit signal; the bundled Caddyfile
+	// and any sane reverse proxy will set the X-Forwarded-Proto
+	// header but we don't trust it for cookie flags because an
+	// operator who wants Secure cookies in production must opt in.
+	cookieSecure := cfg.CookieSecure
+
 	s := &Server{
-		cfg:    cfg,
-		bundle: bundle,
-		log:    logger,
+		cfg:      cfg,
+		bundle:   bundle,
+		log:      logger,
+		db:       database,
+		authMw:   auth.NewMiddleware(database, cookieSecure),
 	}
 	s.router = s.buildRouter()
 	return s, nil
@@ -108,6 +129,20 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/version", s.handleVersion)
 
+	// Unauthenticated auth endpoints.
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/firstrun", auth.HandleFirstRunStatus(s.dbCtx(), s.db))
+		r.Post("/firstrun", auth.HandleFirstRunCreate(s.dbCtx(), s.db, s.cfg.CookieSecure))
+		r.Post("/login", auth.HandleLogin(s.dbCtx(), s.db, s.cfg.CookieSecure))
+	})
+
+	// Authenticated auth endpoints.
+	r.Group(func(r chi.Router) {
+		r.Use(s.authMw.Wrap)
+		r.Post("/api/v1/logout", auth.HandleLogout(s.dbCtx(), s.db, s.cfg.CookieSecure))
+		r.Get("/api/v1/me", auth.HandleMe(s.dbCtx(), s.db))
+	})
+
 	// Static UI mount.
 	r.Handle("/static/*", s.staticHandler())
 	r.Handle("/_app/*", s.staticHandler())
@@ -116,6 +151,13 @@ func (s *Server) buildRouter() http.Handler {
 
 	return r
 }
+
+// dbCtx returns a background context. Background context is fine
+// for these handlers because they each take a short, bounded
+// amount of time; the http.Server enforces its own per-request
+// deadlines via WriteTimeout and the request context is
+// accessible via r.Context() inside each handler.
+func (s *Server) dbCtx() context.Context { return context.Background() }
 
 // securityHeaders sets a baseline of browser-side hardening headers
 // on every response. The reverse proxy duplicates these so a

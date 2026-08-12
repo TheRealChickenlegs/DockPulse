@@ -41,6 +41,7 @@ type Controller struct {
 	WebPath        string   // path to the static UI bundle (dev override)
 	StaticFS       string   // directory served for /static/* when not using embed
 	TrustedProxies []string // CIDR/IPs allowed to set X-Forwarded-For; empty disables trust
+	CookieSecure   bool     // set Secure flag on session cookies (require TLS)
 }
 
 // Agent holds configuration specific to agent mode.
@@ -69,8 +70,8 @@ func (c Common) String() string {
 // and are not useful in logs. TrustedProxies is summarised by count
 // only so individual entries don't leak the operator's network shape.
 func (c Controller) String() string {
-	return fmt.Sprintf("%s listen=%s db=%s web=%s static=%s trusted_proxies=%d",
-		c.Common, c.Listen, redactPath(c.DBPath), redactPath(c.WebPath), c.StaticFS, len(c.TrustedProxies))
+	return fmt.Sprintf("%s listen=%s db=%s web=%s static=%s trusted_proxies=%d cookie_secure=%t",
+		c.Common, c.Listen, redactPath(c.DBPath), redactPath(c.WebPath), c.StaticFS, len(c.TrustedProxies), c.CookieSecure)
 }
 
 // String implements fmt.Stringer for log output without leaking secrets.
@@ -118,6 +119,8 @@ func Load(args []string) (any, error) {
 	staticDir := fs.String("static", "", "Directory served for /static/* when --web is set (controller mode)")
 	trustedProxiesFlag := fs.String("trusted-proxies", os.Getenv("DOCKPULSE_TRUSTED_PROXIES"),
 		"Comma-separated list of reverse-proxy IPs/CIDRs allowed to set X-Forwarded-For (controller mode). Empty disables trust.")
+	cookieSecure := fs.Bool("secure-cookies", envBool("DOCKPULSE_COOKIE_SECURE", false),
+		"Set the Secure attribute on session cookies (controller mode). Required in production behind TLS.")
 
 	// Agent-only
 	name := fs.String("name", "", "Friendly name for this agent host (agent mode)")
@@ -148,6 +151,7 @@ func Load(args []string) (any, error) {
 			WebPath:        *webPath,
 			StaticFS:       *staticDir,
 			TrustedProxies: splitCSV(*trustedProxiesFlag),
+			CookieSecure:   *cookieSecure,
 		}, nil
 	case ModeAgent:
 		if *controllerURL == "" {
@@ -198,4 +202,20 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+// envBool parses a boolean from an environment variable. Accepts
+// 1, t, true, yes, on (case-insensitive) as true; everything else
+// (including empty) is false.
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "t", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

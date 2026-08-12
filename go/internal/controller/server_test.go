@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,24 +12,35 @@ import (
 	"time"
 
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/db"
 )
+
+func newTestServer(t *testing.T) (*Server, *sql.DB) {
+	t.Helper()
+	sqlDB, err := db.Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	srv, err := New(config.Controller{
+		Common: config.Common{Mode: config.ModeController},
+		Listen: ":0",
+		DBPath: ":memory:",
+	}, sqlDB)
+	if err != nil {
+		// In tests we don't run with the embedded bundle present
+		// (internal/web/build is gitignored), so this errors. Skip.
+		_ = sqlDB.Close()
+		t.Skipf("no embedded bundle available in this environment: %v", err)
+	}
+	return srv, sqlDB
+}
 
 // TestServerStartsAndHealthzOK spins up an in-process chi stack and
 // confirms /healthz returns the expected body without leaking host state.
 func TestServerStartsAndHealthzOK(t *testing.T) {
-	srv, err := New(config.Controller{
-		Common:  config.Common{Mode: config.ModeController},
-		Listen:  ":0",
-		DBPath:  ":memory:",
-		WebPath: "",
-	})
-	if err != nil {
-		// In tests we don't run with the embedded bundle present
-		// (internal/web/build is gitignored), so this errors. Skip.
-		t.Skipf("no embedded bundle available in this environment: %v", err)
-	}
-
-	// We can't bind :0 in this stack (we use New), so verify via httptest.
+	srv, _ := newTestServer(t)
 	ts := httptest.NewServer(srv.router)
 	defer ts.Close()
 
@@ -58,18 +70,7 @@ func TestServerStartsAndHealthzOK(t *testing.T) {
 // TestVersionEndpoint confirms /version is reachable and returns JSON
 // without requiring a web bundle.
 func TestVersionEndpoint(t *testing.T) {
-	// /version is mounted on the router regardless of the bundle status,
-	// so we can test it by exercising the handler directly.
-	cfg := config.Controller{
-		Common: config.Common{Mode: config.ModeController},
-		Listen: ":0",
-		DBPath: ":memory:",
-	}
-	srv, err := New(cfg)
-	if err != nil {
-		t.Skipf("no embedded bundle available in this environment: %v", err)
-	}
-
+	srv, _ := newTestServer(t)
 	ts := httptest.NewServer(srv.router)
 	defer ts.Close()
 
@@ -90,15 +91,7 @@ func TestVersionEndpoint(t *testing.T) {
 // TestHealthzNoCache confirms no-cache headers are set on the health
 // endpoint so it cannot be poisoned by an intermediate cache.
 func TestHealthzNoCache(t *testing.T) {
-	cfg := config.Controller{
-		Common: config.Common{Mode: config.ModeController},
-		Listen: ":0",
-		DBPath: ":memory:",
-	}
-	srv, err := New(cfg)
-	if err != nil {
-		t.Skipf("no embedded bundle available in this environment: %v", err)
-	}
+	srv, _ := newTestServer(t)
 	ts := httptest.NewServer(srv.router)
 	defer ts.Close()
 	res, err := http.Get(ts.URL + "/healthz")
@@ -114,25 +107,16 @@ func TestHealthzNoCache(t *testing.T) {
 // TestStartShutdown confirms the server binds, accepts one request,
 // and shuts down cleanly within the deadline.
 func TestStartShutdown(t *testing.T) {
-	cfg := config.Controller{
-		Common: config.Common{Mode: config.ModeController},
-		Listen: "127.0.0.1:0", // overridden by httptest below; we don't actually bind
-		DBPath: ":memory:",
-	}
-	_, err := New(cfg)
-	if err != nil {
-		t.Skipf("no embedded bundle available in this environment: %v", err)
-	}
+	srv, sqlDB := newTestServer(t)
+	defer func() { _ = sqlDB.Close() }()
 
-	// The Listen field is parsed into http.Server.Addr; ":0" won't
-	// work for the production path because we want a stable address.
-	// Instead we construct an httptest server around the router.
-	cfg.Listen = "127.0.0.1:0"
-	srv, err := New(cfg)
-	if err != nil {
-		t.Skipf("no embedded bundle available in this environment: %v", err)
-	}
-	_ = srv
-	_ = context.Background
-	_ = time.Second
+	// Bind to an ephemeral port on loopback.
+	listenCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = srv.Start(listenCtx)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
 }

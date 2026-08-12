@@ -1,30 +1,38 @@
 package controller
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/controller/db"
 )
 
-func newServerWithProxies(t *testing.T, proxies []string) *Server {
+func newServerWithProxies(t *testing.T, proxies []string) (*Server, *sql.DB) {
 	t.Helper()
-	cfg := config.Controller{
+	sqlDB, err := db.Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	s, err := New(config.Controller{
 		Common:         config.Common{Mode: config.ModeController},
 		Listen:         ":0",
 		DBPath:         ":memory:",
 		TrustedProxies: proxies,
-	}
-	s, err := New(cfg)
+	}, sqlDB)
 	if err != nil {
 		t.Skipf("no embedded bundle available in this environment: %v", err)
 	}
-	return s
+	return s, sqlDB
 }
 
 func TestTrustedRealIPIgnoresHeaderByDefault(t *testing.T) {
-	s := newServerWithProxies(t, nil)
+	s, _ := newServerWithProxies(t, nil)
 	handler := s.trustedRealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.RemoteAddr))
 	}))
@@ -36,16 +44,13 @@ func TestTrustedRealIPIgnoresHeaderByDefault(t *testing.T) {
 	req.RemoteAddr = "192.0.2.1:54321"
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// httptest sets RemoteAddr to its own; the XFF should still be ignored
-		// because no trusted proxy is configured. The RemoteAddr in the
-		// response will be the test server's local loopback.
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer res.Body.Close()
 }
 
 func TestTrustedRealIPAllowsHeaderFromTrustedProxy(t *testing.T) {
-	s := newServerWithProxies(t, []string{"127.0.0.0/8"})
+	s, _ := newServerWithProxies(t, []string{"127.0.0.0/8"})
 	handler := s.trustedRealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.RemoteAddr))
 	}))
@@ -68,7 +73,7 @@ func TestTrustedRealIPAllowsHeaderFromTrustedProxy(t *testing.T) {
 }
 
 func TestTrustedRealIPRejectsHeaderFromUntrustedProxy(t *testing.T) {
-	s := newServerWithProxies(t, []string{"10.0.0.0/8"})
+	s, _ := newServerWithProxies(t, []string{"10.0.0.0/8"})
 	handler := s.trustedRealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.RemoteAddr))
 	}))
@@ -91,12 +96,7 @@ func TestTrustedRealIPRejectsHeaderFromUntrustedProxy(t *testing.T) {
 }
 
 func TestTrustedRealIPIgnoresInvalidCIDR(t *testing.T) {
-	// "not-a-cidr" is dropped from the trusted list with a warning;
-	// the second entry is a single valid IP. The test client
-	// connects from 127.0.0.1, which is NOT 192.0.2.1, so XFF is
-	// not honoured — this test confirms the invalid entry is dropped
-	// without causing the whole request to fail.
-	s := newServerWithProxies(t, []string{"not-a-cidr", "192.0.2.1"})
+	s, _ := newServerWithProxies(t, []string{"not-a-cidr", "192.0.2.1"})
 	handler := s.trustedRealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.RemoteAddr))
 	}))
