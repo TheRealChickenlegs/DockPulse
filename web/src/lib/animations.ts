@@ -42,7 +42,9 @@ export function inViewOn(
 	callback: (info: { target: Element }) => void
 ): () => void {
 	const elements = resolve(target);
-	return motionInView(elements, (info) => callback({ target: info.target as Element }));
+	return motionInView(elements, (entry: IntersectionObserverEntry) => {
+		callback({ target: entry.target });
+	});
 }
 
 /**
