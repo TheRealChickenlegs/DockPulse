@@ -1,0 +1,47 @@
+# Exclude everything not needed for the Docker build context.
+# This keeps the build fast and avoids accidentally leaking secrets.
+
+# Version control
+.git
+.gitignore
+.github
+
+# Local development and CI state
+node_modules
+.svelte-kit
+.vite
+.vscode
+.idea
+*.log
+coverage
+*.test
+*.out
+*.prof
+*.bak
+*.tmp
+
+# Generated and built artefacts
+web/build
+web/.svelte-kit
+web/node_modules
+web/coverage
+bin
+data
+dist
+
+# Go module artifacts
+go/internal/web/build
+go/bin
+go/coverage
+go/*.test
+
+# TLS / secrets (never commit)
+/certs
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+.env
+.env.*
+!.env.example

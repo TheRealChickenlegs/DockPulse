@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    name: Lint, test, build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: go/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (npm workspaces)
+        run: npm ci --no-audit --no-fund
+
+      - name: Web type-check
+        working-directory: web
+        run: npm run check
+
+      - name: Web lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Build web bundle
+        working-directory: web
+        run: npm run build
+
+      - name: Place web build for embed
+        run: |
+          rm -rf go/internal/web/build
+          cp -R web/build go/internal/web/build
+
+      - name: Go vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: Go test
+        working-directory: go
+        run: go test -count=1 ./...
+
+      - name: Go build (linux/amd64)
+        working-directory: go
+        run: |
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X github.com/TheRealChickenlegs/DockPulse/go/internal/version.Version=${GITHUB_SHA::7}" \
+            -o ../bin/dockpulse ./cmd/dockpulse
+
+  trivy:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-22.04
+    needs: lint-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

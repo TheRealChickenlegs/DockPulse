@@ -1,0 +1,29 @@
+# Auto-generated. Keep dependencies fresh on a weekly cadence and group
+# them into single PRs per ecosystem so reviews stay small.
+
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/go"
+    schedule:
+      interval: "weekly"
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm-deps:
+        patterns:
+          - "*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"

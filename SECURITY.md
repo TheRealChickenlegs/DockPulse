@@ -1,0 +1,44 @@
+# Security Policy
+
+## Supported versions
+
+DockPulse is in active development. Security patches will be applied to the most recent release and the `main` branch. Earlier releases will not receive backported fixes.
+
+| Version | Supported |
+| --- | --- |
+| `main` | yes |
+| latest tagged release | yes |
+| older releases | no |
+
+## Reporting a vulnerability
+
+**Please do not file a public issue for security bugs.**
+
+Send a private report to one of the maintainers listed at https://github.com/TheRealChickenlegs. Use GitHub's [private vulnerability disclosure](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability) workflow against this repository if you prefer a tracked channel.
+
+We will acknowledge receipt within 72 hours and aim to triage within 7 days. Coordinated disclosure timelines will be agreed with the reporter before any public advisory.
+
+## Security baseline
+
+DockPulse is designed with the assumption that the controller may be exposed to the public internet. The following are baseline properties; deviations are bugs.
+
+- **Authentication is required by default.** No endpoint — including health checks — reveals host or container information to an unauthenticated caller.
+- **Passwords** are stored using Argon2id (memory ≥ 64 MiB, time ≥ 3, threads ≥ 2).
+- **Sessions** are server-side, opaque tokens, `httpOnly`, `Secure`, `SameSite=Strict`.
+- **CSRF** protection on every mutating endpoint via double-submit tokens.
+- **CSP** is `default-src 'self'`; no inline scripts. The SvelteKit adapter-static output produces no inline scripts by default.
+- **HSTS**, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a strict `Permissions-Policy` are set by the bundled Caddy config.
+- **Agents** authenticate to the controller with mTLS using certificates issued by the controller's internal CA on first enrollment. The controller's certificate fingerprint is pinned at enrollment.
+- **All agent payloads** are HMAC-signed with per-agent secrets; replays within a 5-minute window are rejected via nonce store.
+- **Registry credentials** are stored encrypted on the agent host and never transmitted to the controller.
+- **The Docker socket** is never mounted directly into any container. Agents access Docker through `tecnativa/docker-socket-proxy` with `CONTAINERS=1, IMAGES=1, POST=0`, bound to `127.0.0.1`.
+- **Supply chain:** release images are signed with [cosign](https://github.com/sigstore/cosign) and an SBOM is attached to each release. CI runs CodeQL, Trivy, and `govulncheck` on every PR.
+
+## Hardening checklist for operators
+
+- [ ] Put DockPulse behind the bundled Caddy with automatic HTTPS, or your own reverse proxy with equivalent headers.
+- [ ] Restrict the Caddy admin API and bind the listener to the public interface you intend to expose.
+- [ ] Generate a strong enrollment token for each new agent and rotate the controller CA passphrase periodically.
+- [ ] Enable OIDC if exposing DockPulse to the public internet; disable local account creation after the first admin exists.
+- [ ] Back up the SQLite file daily; test restores.
+- [ ] Subscribe to GitHub security advisories for this repository.

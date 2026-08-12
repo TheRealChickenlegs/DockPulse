@@ -1,0 +1,25 @@
+{
+  "name": "dockpulse-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "DockPulse — multi-server Docker dashboard with update detection and changelog aggregation.",
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "web:dev": "npm --workspace web run dev",
+    "web:build": "npm --workspace web run build",
+    "web:check": "npm --workspace web run check",
+    "web:lint": "npm --workspace web run lint",
+    "go:vet": "go vet ./...",
+    "go:test": "go test -race -count=1 ./...",
+    "build:web": "npm run web:build",
+    "build:go": "go build -trimpath -o bin/dockpulse ./cmd/dockpulse",
+    "build": "npm run build:web && npm run build:go"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  },
+  "license": "MIT"
+}

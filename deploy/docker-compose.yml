@@ -1,0 +1,56 @@
+# Full controller stack: reverse proxy + DockPulse controller.
+#
+# Usage:
+#   1. Edit the `domain` value below or set DOCKPULSE_DOMAIN.
+#   2. Generate a strong CA passphrase:
+#        openssl rand -hex 32
+#      and place it in a `.env` file next to this compose file:
+#        DOCKPULSE_DOMAIN=dockpulse.example.com
+#        DOCKPULSE_CA_PASS=<hex>
+#   3. docker compose -f deploy/docker-compose.yml up -d
+#
+# In Phase 0 the controller only exposes /healthz and the placeholder UI.
+# Phase 1 adds the database migrations and the agent API.
+
+name: dockpulse
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOCKPULSE_DOMAIN: ${DOCKPULSE_DOMAIN:?Set DOCKPULSE_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      controller:
+        condition: service_started
+    networks: [frontend, backend]
+
+  controller:
+    image: ghcr.io/therealchickenlegs/dockpulse:${DOCKPULSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command:
+      - "--mode=controller"
+      - "--listen=:8080"
+      - "--db=/data/dockpulse.db"
+    environment:
+      DOCKPULSE_LOG_LEVEL: ${DOCKPULSE_LOG_LEVEL:-info}
+      DOCKPULSE_LOG_FORMAT: json
+    volumes:
+      - controller_data:/data
+    networks: [backend]
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  controller_data:
+  caddy_data:
+  caddy_config:

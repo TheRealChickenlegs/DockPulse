@@ -1,0 +1,70 @@
+# Caddyfile for the DockPulse controller.
+#
+# This file is used by the bundled compose stack (deploy/docker-compose.yml).
+# Replace ${DOCKPULSE_DOMAIN} with your hostname and supply an email for
+# ACME via the environment when starting Caddy.
+
+{
+    # Admin API is bound to localhost only so the host operator can introspect
+    # Caddy state without exposing it externally.
+    admin localhost:2019
+    auto_https off
+}
+
+(common_security_headers) {
+    header {
+        # Defense in depth: even if a future proxy chain drops these,
+        # the controller's responses still carry them.
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        # The SvelteKit bundle uses no inline scripts; 'self' is sufficient.
+        Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    }
+}
+
+(common_rate_limits) {
+    @login path /api/v1/login
+    rate_limit @login 10r/m
+    @api path /api/*
+    rate_limit @api 120r/m
+}
+
+(common_logging) {
+    log {
+        output stdout
+        level INFO
+    }
+}
+
+https://${DOCKPULSE_DOMAIN} {
+    import common_security_headers
+    import common_rate_limits
+    import common_logging
+
+    encode zstd gzip
+
+    @static path /static/* /_app/* /favicon.svg /favicon.ico /robots.txt /assets/*
+    handle @static {
+        header Cache-Control "public, max-age=31536000, immutable"
+        reverse_proxy controller:8080
+    }
+
+    handle /healthz /version {
+        header Cache-Control "no-store"
+        reverse_proxy controller:8080
+    }
+
+    handle {
+        header Cache-Control "no-cache"
+        reverse_proxy controller:8080
+    }
+}
+
+http://${DOCKPULSE_DOMAIN} {
+    import common_security_headers
+    import common_logging
+    redir https://{host}{uri} permanent
+}

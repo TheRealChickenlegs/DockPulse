@@ -1,0 +1,61 @@
+# Drop-in agent compose file. Place this on every Docker host you want
+# DockPulse to monitor.
+#
+# Usage:
+#   1. From the controller UI, create an enrollment token and copy it.
+#   2. On the agent host, drop the token into a file:
+#        mkdir -p ./agent-data
+#        printf '<TOKEN>' > ./agent-data/enroll.token
+#        chmod 600 ./agent-data/enroll.token
+#   3. Update AGENT_NAME and CONTROLLER_URL below.
+#   4. docker compose -f deploy/docker-compose.agent.yml up -d
+#
+# In Phase 0 the agent will validate configuration and idle; the
+# enrollment handshake ships in Phase 1.
+
+name: dockpulse-agent
+
+services:
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    restart: unless-stopped
+    # Read-only access to local Docker, no exec, no destructive ops.
+    # Bound to the agent network only.
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      POST: "0"
+      AUTH: "1"
+      LOG_LEVEL: "warn"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - agent
+    # Expose only on the agent's internal network.
+    expose:
+      - "2375"
+
+  agent:
+    image: ghcr.io/therealchickenlegs/dockpulse:${DOCKPULSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command:
+      - "--mode=agent"
+      - "--name=${AGENT_NAME:?Set AGENT_NAME in .env}"
+      - "--controller=${CONTROLLER_URL:?Set CONTROLLER_URL in .env}"
+      - "--docker=tcp://socket-proxy:2375"
+      - "--data=/data"
+      - "--enroll-token-file=/data/enroll.token"
+    environment:
+      DOCKPULSE_LOG_LEVEL: ${DOCKPULSE_LOG_LEVEL:-info}
+      DOCKPULSE_LOG_FORMAT: json
+      # Authentication for the local socket proxy. Generated once per host.
+      SOCKET_PROXY_AUTH: "${SOCKET_PROXY_AUTH:-}"
+    volumes:
+      - ./agent-data:/data:rw
+    depends_on:
+      - socket-proxy
+    networks:
+      - agent
+
+networks:
+  agent:

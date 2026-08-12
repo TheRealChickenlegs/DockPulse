@@ -1,0 +1,74 @@
+# Build artifacts
+/bin/
+/dist/
+/dockpulse
+/dockpulse-*
+
+# Test outputs
+/coverage/
+*.test
+*.out
+
+# Web build outputs
+/web/.svelte-kit/
+/web/build/
+/web/node_modules/
+/web/.vite/
+
+# Dependencies
+/node_modules/
+/vendor/
+
+# Secrets and runtime data
+/data/
+/caddy_data/
+/caddy_config/
+/secrets/
+/*.env
+/.env
+/.env.local
+
+# TLS / certs (never commit)
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+certs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/logs/
+
+# Go
+*.test
+*.prof
+
+# Node
+.npm/
+.yarn/
+
+# Local dev DB
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Embedded web bundle. CI rebuilds this from web/ before each release;
+# committing it just bloats the diff history.
+/go/internal/web/build/
+
+# Backup files
+*.bak
+*.tmp
