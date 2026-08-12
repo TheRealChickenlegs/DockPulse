@@ -42,8 +42,12 @@ export function inViewOn(
 	callback: (info: { target: Element }) => void
 ): () => void {
 	const elements = resolve(target);
-	return motionInView(elements, (entry: IntersectionObserverEntry) => {
-		callback({ target: entry.target });
+	// motion v13's `inView` callback receives (element, entry) when
+	// given a non-single element. We use the first argument as the
+	// matched target so the wrapper's own signature stays stable
+	// across motion versions.
+	return motionInView(elements, (element: Element, _entry: IntersectionObserverEntry) => {
+		callback({ target: element });
 	});
 }
 
