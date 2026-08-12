@@ -36,10 +36,11 @@ type Common struct {
 // Controller holds configuration specific to controller mode.
 type Controller struct {
 	Common
-	Listen   string // address to bind the controller HTTP server (no TLS)
-	DBPath   string // path to the SQLite file
-	WebPath  string // path to the static UI bundle (dev override)
-	StaticFS string // directory served for /static/* when not using embed
+	Listen         string   // address to bind the controller HTTP server (no TLS)
+	DBPath         string   // path to the SQLite file
+	WebPath        string   // path to the static UI bundle (dev override)
+	StaticFS       string   // directory served for /static/* when not using embed
+	TrustedProxies []string // CIDR/IPs allowed to set X-Forwarded-For; empty disables trust
 }
 
 // Agent holds configuration specific to agent mode.
@@ -65,9 +66,11 @@ func (c Common) String() string {
 
 // String implements fmt.Stringer for log output without leaking secrets.
 // The DB path is redacted because SQLite paths can leak host layout
-// and are not useful in logs.
+// and are not useful in logs. TrustedProxies is summarised by count
+// only so individual entries don't leak the operator's network shape.
 func (c Controller) String() string {
-	return fmt.Sprintf("%s listen=%s db=%s web=%s static=%s", c.Common, c.Listen, redactPath(c.DBPath), redactPath(c.WebPath), c.StaticFS)
+	return fmt.Sprintf("%s listen=%s db=%s web=%s static=%s trusted_proxies=%d",
+		c.Common, c.Listen, redactPath(c.DBPath), redactPath(c.WebPath), c.StaticFS, len(c.TrustedProxies))
 }
 
 // String implements fmt.Stringer for log output without leaking secrets.
@@ -113,6 +116,8 @@ func Load(args []string) (any, error) {
 	dbPath := fs.String("db", "./data/dockpulse.db", "Path to the SQLite database file (controller mode)")
 	webPath := fs.String("web", "", "Path to a built web bundle (overrides embedded bundle; controller mode, dev only)")
 	staticDir := fs.String("static", "", "Directory served for /static/* when --web is set (controller mode)")
+	trustedProxiesFlag := fs.String("trusted-proxies", os.Getenv("DOCKPULSE_TRUSTED_PROXIES"),
+		"Comma-separated list of reverse-proxy IPs/CIDRs allowed to set X-Forwarded-For (controller mode). Empty disables trust.")
 
 	// Agent-only
 	name := fs.String("name", "", "Friendly name for this agent host (agent mode)")
@@ -137,11 +142,12 @@ func Load(args []string) (any, error) {
 	switch mode {
 	case ModeController:
 		return Controller{
-			Common:   Common{Mode: mode},
-			Listen:   *listen,
-			DBPath:   *dbPath,
-			WebPath:  *webPath,
-			StaticFS: *staticDir,
+			Common:         Common{Mode: mode},
+			Listen:         *listen,
+			DBPath:         *dbPath,
+			WebPath:        *webPath,
+			StaticFS:       *staticDir,
+			TrustedProxies: splitCSV(*trustedProxiesFlag),
 		}, nil
 	case ModeAgent:
 		if *controllerURL == "" {
@@ -174,4 +180,22 @@ func Load(args []string) (any, error) {
 // cycle in Phase 1.
 func VersionString() string {
 	return "DockPulse dev"
+}
+
+// splitCSV trims whitespace and drops empty entries. It is intentionally
+// permissive — invalid CIDR entries are caught later by the caller when
+// the addresses are parsed at the network layer.
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

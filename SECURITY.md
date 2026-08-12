@@ -27,7 +27,8 @@ DockPulse is designed with the assumption that the controller may be exposed to 
 - **Sessions** are server-side, opaque tokens, `httpOnly`, `Secure`, `SameSite=Strict`.
 - **CSRF** protection on every mutating endpoint via double-submit tokens.
 - **CSP** is `default-src 'self'`; no inline scripts. The SvelteKit adapter-static output produces no inline scripts by default.
-- **HSTS**, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a strict `Permissions-Policy` are set by the bundled Caddy config.
+- **HSTS**, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a strict `Permissions-Policy` are the **operator's reverse proxy's** responsibility. The controller sets a defensive baseline of the non-CSP/non-HSTS headers itself so a misconfigured proxy cannot degrade them, but TLS, HSTS, CSP, and rate limits must be set by the proxy. An optional `deploy/docker-compose.with-caddy.yml` bundles Caddy with the full set for users who don't have their own reverse proxy.
+- **`X-Forwarded-For` trust** is opt-in: the controller ignores the header by default. Operators who front the controller with a reverse proxy must set `--trusted-proxies` (or `DOCKPULSE_TRUSTED_PROXIES`) to the proxy's IP/CIDR so audit logs and rate limits see the real client IP.
 - **Agents** authenticate to the controller with mTLS using certificates issued by the controller's internal CA on first enrollment. The controller's certificate fingerprint is pinned at enrollment.
 - **All agent payloads** are HMAC-signed with per-agent secrets; replays within a 5-minute window are rejected via nonce store.
 - **Registry credentials** are stored encrypted on the agent host and never transmitted to the controller.
@@ -36,8 +37,10 @@ DockPulse is designed with the assumption that the controller may be exposed to 
 
 ## Hardening checklist for operators
 
-- [ ] Put DockPulse behind the bundled Caddy with automatic HTTPS, or your own reverse proxy with equivalent headers.
-- [ ] Restrict the Caddy admin API and bind the listener to the public interface you intend to expose.
+- [ ] Put DockPulse behind your own reverse proxy (nginx proxy manager, Traefik, Caddy, HAProxy) and ensure the proxy terminates TLS, sets HSTS, CSP, and rate limits. See `deploy/README.md` for the header set.
+- [ ] Set `DOCKPULSE_TRUSTED_PROXIES` in `deploy/.env` to the IP or CIDR of your reverse proxy so client IPs are recorded accurately.
+- [ ] Do not publish the controller's port 8080 to `0.0.0.0`; only join the Docker network the reverse proxy is on.
+- [ ] If you use the optional bundled Caddy stack, restrict the Caddy admin API to `localhost` (the bundled `Caddyfile` already does this).
 - [ ] Generate a strong enrollment token for each new agent and rotate the controller CA passphrase periodically.
 - [ ] Enable OIDC if exposing DockPulse to the public internet; disable local account creation after the first admin exists.
 - [ ] Back up the SQLite file daily; test restores.

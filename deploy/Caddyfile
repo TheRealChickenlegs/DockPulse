@@ -1,8 +1,10 @@
-# Caddyfile for the DockPulse controller.
+# Caddyfile for the OPTIONAL bundled Caddy stack.
 #
-# This file is used by the bundled compose stack (deploy/docker-compose.yml).
-# Replace ${DOCKPULSE_DOMAIN} with your hostname and supply an email for
-# ACME via the environment when starting Caddy.
+# This file is used by `deploy/docker-compose.with-caddy.yml` only.
+# If you use the default `deploy/docker-compose.yml` (no bundled
+# reverse proxy), your own reverse proxy (nginx proxy manager,
+# Traefik, etc.) should set equivalent headers and rate limits —
+# see deploy/README.md for the header set Caddy applies here.
 
 {
     # Admin API is bound to localhost only so the host operator can introspect

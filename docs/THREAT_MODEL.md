@@ -1,13 +1,15 @@
 # Threat Model
 
 > Living document. Treated as code: changes require a PR review and a short rationale in the commit message.
-
 ## Scope
 
-This document covers DockPulse v1 — the controller, the agent, and the web UI bundle — in two deployment contexts:
+This document covers DockPulse v1 — the controller, the agent, and the
+web UI bundle — in two deployment contexts:
 
 1. **Homelab / LAN-only** — controller reachable only from the local network.
-2. **Externally exposed** — controller reachable from the public internet, typically through a reverse proxy.
+2. **Externally exposed** — controller reachable from the public internet, typically through an operator-managed reverse proxy (nginx proxy manager, Traefik, Caddy, HAProxy, etc.).
+
+The reverse proxy is **not** a DockPulse component. It is the operator's responsibility to run a hardened proxy, terminate TLS, and apply the header set documented in `deploy/README.md` and `SECURITY.md`. The controller sets a defensive baseline of non-CSP/non-HSTS headers itself so a misconfigured proxy cannot fully degrade the baseline.
 
 It does **not** cover:
 
@@ -82,7 +84,11 @@ It does **not** cover:
 
 ### T13 — Denial of service
 
-**Mitigation:** Caddy connection limits, controller `http.Server` read/write timeouts, SQLite WAL with `busy_timeout`, registry polling is rate-limited and distributed across agents (each host polls its own images, not a centralized thundering herd).
+**Mitigation:** Connection limits and rate limits on the operator's reverse proxy (the bundled `Caddyfile` shows the Caddy set; replicate the same in your proxy), controller `http.Server` read/write timeouts, SQLite WAL with `busy_timeout`, registry polling is rate-limited and distributed across agents (each host polls its own images, not a centralized thundering herd).
+
+### T14 — Spoofed source IP via `X-Forwarded-For`
+
+**Mitigation:** The controller ignores `X-Forwarded-For` by default. The middleware only honours the header when the connection's remote address is in the operator-supplied `--trusted-proxies` list (CIDR or single IP). An attacker cannot spoof their source IP unless they are the trusted proxy itself, in which case the attack is on the proxy, not DockPulse.
 
 ## Residual risk
 

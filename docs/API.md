@@ -37,14 +37,14 @@ The following endpoints are planned but **not yet implemented**:
 
 ## Headers
 
-Every response carries (set by Caddy; mirrored in the controller):
+Every response carries a defensive baseline set by the controller:
 
-- `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
 - `Referrer-Policy: no-referrer`
-- `Content-Security-Policy: default-src 'self'; …`
 - `Permissions-Policy: …`
+
+The operator's reverse proxy is responsible for the remaining hardening headers (TLS termination, HSTS, CSP, and rate limits). The bundled optional `Caddyfile` shows the full set Caddy applies. See `deploy/README.md` for the required header list if you use a different proxy.
 
 Mutating endpoints require a `X-CSRF-Token` header whose token is the value of the `dockpulse_csrf` cookie.
 
@@ -52,6 +52,8 @@ Mutating endpoints require a `X-CSRF-Token` header whose token is the value of t
 
 - `/api/v1/login`: 10 requests / minute / IP.
 - `/api/*`: 120 requests / minute / IP.
+
+These limits are documented as a baseline. In production they are enforced by the operator's reverse proxy.
 
 ## CORS
 

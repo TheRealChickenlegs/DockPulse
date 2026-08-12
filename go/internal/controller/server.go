@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
@@ -96,7 +98,7 @@ func (s *Server) buildRouter() http.Handler {
 	r := chi.NewRouter()
 
 	// Hardening middleware applied to every request.
-	r.Use(middleware.RealIP)
+	r.Use(s.trustedRealIP)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(s.securityHeaders)
@@ -125,6 +127,64 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// trustedRealIP replaces chi's middleware.RealIP with a variant that
+// only honours X-Forwarded-For when the connection's remote address
+// matches one of the configured trusted proxies. This prevents a
+// client from spoofing its source IP by setting the header itself.
+//
+// When no trusted proxies are configured, the header is ignored and
+// the connection's real remote address is used.
+func (s *Server) trustedRealIP(next http.Handler) http.Handler {
+	if len(s.cfg.TrustedProxies) == 0 {
+		return next
+	}
+
+	nets := make([]*net.IPNet, 0, len(s.cfg.TrustedProxies))
+	for _, cidr := range s.cfg.TrustedProxies {
+		if strings.Contains(cidr, "/") {
+			_, n, err := net.ParseCIDR(cidr)
+			if err != nil {
+				s.log.Warn("ignoring invalid trusted-proxy CIDR", "value", cidr, "err", err)
+				continue
+			}
+			nets = append(nets, n)
+			continue
+		}
+		ip := net.ParseIP(cidr)
+		if ip == nil {
+			s.log.Warn("ignoring invalid trusted-proxy IP", "value", cidr)
+			continue
+		}
+		nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(len(ip)*8, len(ip)*8)})
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		remote := net.ParseIP(host)
+		if remote == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		trusted := false
+		for _, n := range nets {
+			if n.Contains(remote) {
+				trusted = true
+				break
+			}
+		}
+		if trusted {
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				parts := strings.Split(xff, ",")
+				r.RemoteAddr = strings.TrimSpace(parts[0]) + ":0"
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

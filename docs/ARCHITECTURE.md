@@ -5,6 +5,15 @@
 ## Topology
 
 ```
+                ┌────────────────────────────────┐
+                │  Reverse proxy (operator)      │
+                │  nginx proxy manager / Traefik │
+                │  / Caddy / HAProxy             │
+                │  + TLS termination             │
+                │  + HSTS, CSP, rate limits      │
+                └─────────────────┬──────────────┘
+                                  │  plain HTTP on private net
+                                  ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                  DockPulse Controller (1×)                    │
 │  ┌─────────────────────────────┐  ┌────────────────────────┐ │
@@ -32,6 +41,10 @@
         └──────────┘  └──────────┘  └──────────┘  └──────────┘
 ```
 
+DockPulse does not include a reverse proxy in the default deployment. The controller binds to plain HTTP on a private Docker network and is reached via the operator's existing reverse proxy (nginx proxy manager, Traefik, Caddy, HAProxy, etc.). The controller sets a defensive baseline of security headers itself, but the reverse proxy is the **primary** enforcement point for TLS, HSTS, CSP, and rate limits.
+
+An optional `docker-compose.with-caddy.yml` is provided for users who don't already run a reverse proxy. See `deploy/README.md`.
+
 ## Why agents, not direct Docker access
 
 - Avoids opening the Docker API port on every host to the controller.
@@ -43,11 +56,13 @@
 
 ### Controller (`--mode=controller`, default)
 
-- Listens on `:8080` internally; the bundled Caddy terminates TLS and serves the static UI bundle.
+- Listens on plain HTTP on a private Docker network and is reached via the operator's reverse proxy. The default compose stack does not publish 8080 to the host.
 - Owns the SQLite database and runs schema migrations on boot.
 - Issues mTLS client certificates for newly enrolled agents.
 - Dispatches notifications via the configured notifiers.
 - Hosts the `frontend API` consumed by the SvelteKit UI.
+- Sets a defensive baseline of security headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy) on every response. The reverse proxy is the primary enforcement point for HSTS, CSP, and rate limits.
+- Resolves the client IP only from `X-Forwarded-For` if the connection's remote address is in `--trusted-proxies`; otherwise the connection's real remote address is used. This prevents a client from spoofing its source IP.
 
 ### Agent (`--mode=agent`)
 
