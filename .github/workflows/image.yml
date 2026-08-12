@@ -77,6 +77,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install cosign
+        if: steps.meta.outputs.push == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3
+
       - name: Sign image with cosign (keyless OIDC)
         if: steps.meta.outputs.push == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
