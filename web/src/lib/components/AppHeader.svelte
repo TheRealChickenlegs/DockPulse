@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 
 	let status: 'checking' | 'ok' | 'down' = $state('checking');
 	let version: string | null = $state(null);
@@ -34,11 +35,11 @@
 		<span class="name">DockPulse</span>
 	</div>
 	<nav class="nav" aria-label="primary">
-		<a href="/" aria-current="page">Dashboard</a>
-		<a href="/servers">Servers</a>
-		<a href="/containers">Containers</a>
-		<a href="/updates">Updates</a>
-		<a href="/settings">Settings</a>
+		<a href={resolve('/')} aria-current="page">Dashboard</a>
+		<a href={resolve('/servers')}>Servers</a>
+		<a href={resolve('/containers')}>Containers</a>
+		<a href={resolve('/updates')}>Updates</a>
+		<a href={resolve('/settings')}>Settings</a>
 	</nav>
 	<div class="status" aria-live="polite">
 		<span class="dot" data-status={status}></span>

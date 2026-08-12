@@ -24,6 +24,21 @@ export default ts.config(
 		}
 	},
 	{
+		// Allow identifiers prefixed with `_` to be unused; this is the
+		// standard convention for "intentionally unused" callback params
+		// that must be declared to satisfy an external type signature.
+		rules: {
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{
+					argsIgnorePattern: '^_',
+					varsIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_'
+				}
+			]
+		}
+	},
+	{
 		ignores: ['build/', '.svelte-kit/', 'dist/', 'src/app.d.ts']
 	}
 );
