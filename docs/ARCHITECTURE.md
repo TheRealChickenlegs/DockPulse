@@ -56,7 +56,7 @@ An optional `docker-compose.with-caddy.yml` is provided for users who don't alre
 
 ### Controller (`--mode=controller`, default)
 
-- Listens on plain HTTP on a private Docker network and is reached via the operator's reverse proxy. The default compose stack does not publish 8080 to the host.
+- Listens on plain HTTP on a private Docker network and is reached via the operator's reverse proxy. The default compose stack does not publish 9787 to the host.
 - Owns the SQLite database and runs schema migrations on boot.
 - Issues mTLS client certificates for newly enrolled agents.
 - Dispatches notifications via the configured notifiers.

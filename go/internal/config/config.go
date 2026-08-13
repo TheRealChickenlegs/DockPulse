@@ -48,12 +48,13 @@ type Controller struct {
 // Agent holds configuration specific to agent mode.
 type Agent struct {
 	Common
-	Name             string // human-readable name for this agent host
-	ControllerURL    string // controller base URL, e.g. https://dockpulse.example.com
-	DockerHost       string // docker daemon URL, e.g. unix:///var/run/docker.sock
-	DataDir          string // directory for certs, registry creds, state
-	EnrollTokenFile  string // path to a file containing the one-time enrollment token
-	ControllerCAFile string // path to the controller CA certificate (for pinning)
+	Name                   string // human-readable name for this agent host
+	ControllerURL          string // controller base URL, e.g. https://dockpulse.example.com
+	AllowInsecureController bool   // TEST ONLY: allow http:// controllers even when host is not local
+	DockerHost              string // docker daemon URL, e.g. unix:///var/run/docker.sock
+	DataDir                 string // directory for certs, registry creds, state
+	EnrollTokenFile         string // path to a file containing the one-time enrollment token
+	ControllerCAFile        string // path to the controller CA certificate (for pinning)
 }
 
 // Config is the resolved configuration for the running process.
@@ -114,7 +115,12 @@ func Load(args []string) (any, error) {
 	fs := flag.NewFlagSet("dockpulse", flag.ContinueOnError)
 
 	modeStr := fs.String("mode", string(ModeController), "Operating mode: controller or agent")
-	listen := fs.String("listen", ":8080", "Address for the controller HTTP listener (controller mode)")
+	// Listen address defaults to ":9787" - all interfaces on port
+	// 9787. This is friendlier than 127.0.0.1:9787 because the
+	// dashboard is reachable from the LAN without any extra flags,
+	// and friendlier than 8080 because that port is commonly used
+	// by other apps (Prometheus, Tomcat, Jenkins, etc.).
+	listen := fs.String("listen", ":9787", "Address for the controller HTTP listener (controller mode). Use the host's LAN IP (e.g. 192.168.10.10:9787) to expose the dashboard on the LAN; leave as :9787 for all interfaces")
 	dbPath := fs.String("db", "./data/dockpulse.db", "Path to the SQLite database file (controller mode)")
 	webPath := fs.String("web", "", "Path to a built web bundle (overrides embedded bundle; controller mode, dev only)")
 	staticDir := fs.String("static", "", "Directory served for /static/* when --web is set (controller mode)")
@@ -129,6 +135,13 @@ func Load(args []string) (any, error) {
 	// Agent-only
 	name := fs.String("name", "", "Friendly name for this agent host (agent mode)")
 	controllerURL := fs.String("controller", "", "Controller base URL, e.g. https://dockpulse.example.com (agent mode)")
+	// Allow insecure (http://) controllers when the host is
+	// obviously local (loopback, RFC1918, link-local, .local,
+	// .lan). For everything else https:// is required. The
+	// --allow-insecure-controller flag bypasses the check
+	// entirely (test only - emits a loud warning).
+	allowInsecureController := fs.Bool("allow-insecure-controller", envBool("DOCKPULSE_ALLOW_INSECURE_CONTROLLER", false),
+		"TEST ONLY: permit --controller to use http:// even when the host is not a known local address. Loud warning.")
 	dockerHost := fs.String("docker", "unix:///var/run/docker.sock", "Docker daemon URL (agent mode)")
 	dataDir := fs.String("data", "./data", "Directory for agent state (agent mode)")
 	tokenFile := fs.String("enroll-token-file", "", "Path to a file containing the one-time enrollment token (agent mode)")
@@ -171,13 +184,14 @@ func Load(args []string) (any, error) {
 			}
 		}
 		return Agent{
-			Common:         Common{Mode: mode},
-			Name:           *name,
-			ControllerURL:  *controllerURL,
-			DockerHost:     *dockerHost,
-			DataDir:        *dataDir,
-			EnrollTokenFile: *tokenFile,
-			ControllerCAFile: *controllerCA,
+			Common:                Common{Mode: mode},
+			Name:                  *name,
+			ControllerURL:         *controllerURL,
+			AllowInsecureController: *allowInsecureController,
+			DockerHost:            *dockerHost,
+			DataDir:               *dataDir,
+			EnrollTokenFile:       *tokenFile,
+			ControllerCAFile:      *controllerCA,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown mode %q (expected controller or agent)", *modeStr)

@@ -69,5 +69,5 @@ COPY --from=build /out/dockpulse /usr/local/bin/dockpulse
 USER nonroot:nonroot
 WORKDIR /data
 VOLUME ["/data"]
-EXPOSE 8080
+EXPOSE 9787
 ENTRYPOINT ["/usr/local/bin/dockpulse"]

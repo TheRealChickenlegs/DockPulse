@@ -61,6 +61,83 @@ func TestValidateAcceptsValidConfig(t *testing.T) {
 	}
 }
 
+func TestIsLocalHost(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"127.0.0.1", true},
+		{"127.0.0.53", true},
+		{"::1", true},
+		{"localhost", true},
+		{"10.0.0.5", true},
+		{"172.16.3.4", true},
+		{"192.168.10.10", true},
+		{"169.254.1.1", true}, // link-local
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+		{"203.0.113.5", false},
+		{"myhost.local", true},
+		{"myhost.lan", true},
+		{"myhost.example.com", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isLocalHost(c.host); got != c.want {
+			t.Errorf("isLocalHost(%q) = %v, want %v", c.host, got, c.want)
+		}
+	}
+}
+
+func TestValidateAllowsHTTPForLocalHosts(t *testing.T) {
+	cases := []string{
+		"http://127.0.0.1:9787",
+		"http://localhost:9787",
+		"http://10.0.0.5:9787",
+		"http://192.168.10.10:9787",
+		"http://myhost.local:9787",
+	}
+	for _, u := range cases {
+		cfg := config.Agent{
+			Common:        config.Common{Mode: config.ModeAgent},
+			Name:          "x",
+			ControllerURL: u,
+			DockerHost:    "unix:///var/run/docker.sock",
+			DataDir:       t.TempDir(),
+		}
+		if err := validate(cfg); err != nil {
+			t.Errorf("validate(%q): unexpected error: %v", u, err)
+		}
+	}
+}
+
+func TestValidateRejectsHTTPForPublicHosts(t *testing.T) {
+	cfg := config.Agent{
+		Common:        config.Common{Mode: config.ModeAgent},
+		Name:          "x",
+		ControllerURL: "http://dockpulse.example.com",
+		DockerHost:    "unix:///var/run/docker.sock",
+		DataDir:       t.TempDir(),
+	}
+	if err := validate(cfg); err == nil {
+		t.Fatal("expected error for http public host without --allow-insecure-controller")
+	}
+}
+
+func TestValidateAllowsInsecureControllerOverride(t *testing.T) {
+	cfg := config.Agent{
+		Common:                 config.Common{Mode: config.ModeAgent},
+		Name:                   "x",
+		ControllerURL:          "http://dockpulse.example.com",
+		AllowInsecureController: true,
+		DockerHost:             "unix:///var/run/docker.sock",
+		DataDir:                t.TempDir(),
+	}
+	if err := validate(cfg); err != nil {
+		t.Fatalf("with --allow-insecure-controller, expected no error: %v", err)
+	}
+}
+
 func TestRunCreatesDataDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agent-data")
 	// Pre-place an enroll token file so the daemon's first-start

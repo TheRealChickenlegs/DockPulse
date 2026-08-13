@@ -32,7 +32,7 @@ docker compose -f deploy/docker-compose.yml up -d
 #    - Add a new proxy host for your DockPulse domain
 #    - Scheme: http
 #    - Forward hostname: controller
-#    - Forward port: 8080
+#    - Forward port: 9787
 #    - Enable Websockets
 #    - Apply the security headers from the next section
 
@@ -75,10 +75,10 @@ DOCKPULSE_PROXY_NETWORK=npm-net
 docker compose -f deploy/docker-compose.yml up -d
 
 # In NPM, the proxy host's "Forward Hostname" is `controller` and
-# "Forward Port" is `8080`.
+# "Forward Port" is `9787`.
 ```
 
-**nginx proxy manager on a different host** — publish the controller port on the host loopback only (uncomment the `ports:` block in `docker-compose.yml`) and point NPM at `host-ip:8080`. Never publish 8080 on `0.0.0.0`.
+**nginx proxy manager on a different host** — publish the controller port on the host loopback only (uncomment the `ports:` block in `docker-compose.yml`) and point NPM at `host-ip:9787`. Never publish 9787 on `0.0.0.0`.
 
 ## Optional: bundled Caddy
 

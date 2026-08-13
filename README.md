@@ -21,12 +21,12 @@ The web UI is a SvelteKit application built to a static bundle and embedded in t
 
 ## Status
 
-**Phase 0 — Skeleton.** Repo scaffold, mode-aware binary, `/healthz` endpoint, embedded SvelteKit placeholder UI, multi-stage Dockerfile, and CI. See `docs/ARCHITECTURE.md` for the full design and `docs/SECURITY.md` for the threat model.
+**Phase 1 — Core.** Local accounts, Argon2id + CSRF + session cookies, SQLite database, agent enrollment + mTLS, container inventory, and the SPA shell. See `docs/ARCHITECTURE.md` for the full design and `docs/SECURITY.md` for the threat model.
 
 ## Quick start (development)
 
 ```bash
-# 1. Install Go 1.22+ and Node 20+
+# 1. Install Go 1.25+ and Node 20+
 # 2. Install dependencies (npm workspaces + Go module)
 npm ci
 (cd go && go mod download)
@@ -34,13 +34,16 @@ npm ci
 # 3. Build the web bundle and the Go binary
 make build
 
-# 4. Run the controller (defaults to --mode=controller)
-./bin/dockpulse --db=./data/dev.db
+# 4. Run the controller (defaults: --listen=:9787, --db=./data/dockpulse.db)
+#    Open http://localhost:9787 to set up the first admin.
+./bin/dockpulse
 
-# 5. Run an agent pointed at it (separate terminal)
-./bin/dockpulse --mode=agent --controller=https://localhost:8443 \
-    --name=local-test --docker=unix:///var/run/docker.sock
+# 5. Run an agent pointed at the local controller (LAN http is OK)
+./bin/dockpulse --mode=agent --controller=http://192.168.10.10:9787 \
+    --name=server-a --docker=tcp://socket-proxy:2375
 ```
+
+The controller listens on all interfaces by default. From another machine on the same LAN, just browse to `http://<host-lan-ip>:9787`. For internet-facing deployment, put a reverse proxy in front and set `--secure-cookies` and `--trusted-proxies`. The agent requires `https://` for any non-local host unless you pass `--allow-insecure-controller`.
 
 For end-to-end testing with TLS and the reverse proxy, see `deploy/README.md` and `docs/AGENT_SETUP.md`.
 

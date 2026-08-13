@@ -39,7 +39,7 @@ DockPulse is designed with the assumption that the controller may be exposed to 
 
 - [ ] Put DockPulse behind your own reverse proxy (nginx proxy manager, Traefik, Caddy, HAProxy) and ensure the proxy terminates TLS, sets HSTS, CSP, and rate limits. See `deploy/README.md` for the header set.
 - [ ] Set `DOCKPULSE_TRUSTED_PROXIES` in `deploy/.env` to the IP or CIDR of your reverse proxy so client IPs are recorded accurately.
-- [ ] Do not publish the controller's port 8080 to `0.0.0.0`; only join the Docker network the reverse proxy is on.
+- [ ] Do not publish the controller's port 9787 to `0.0.0.0`; only join the Docker network the reverse proxy is on.
 - [ ] If you use the optional bundled Caddy stack, restrict the Caddy admin API to `localhost` (the bundled `Caddyfile` already does this).
 - [ ] Generate a strong enrollment token for each new agent and rotate the controller CA passphrase periodically.
 - [ ] Enable OIDC if exposing DockPulse to the public internet; disable local account creation after the first admin exists.

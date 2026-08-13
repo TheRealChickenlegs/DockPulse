@@ -13,7 +13,7 @@
 #   1. Copy `.env.example` to `.env` and edit values as needed.
 #   2. Place the controller on a network your reverse proxy can reach
 #      (the included `proxy` network is used by default).
-#   3. Point your reverse proxy at `controller:8080` and apply the
+#   3. Point your reverse proxy at `controller:9787` and apply the
 #      security headers documented in deploy/README.md.
 #   4. docker compose -f deploy/docker-compose.yml up -d
 
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     command:
       - "--mode=controller"
-      - "--listen=:8080"
+      - "--listen=:9787"
       - "--db=/data/dockpulse.db"
     environment:
       DOCKPULSE_LOG_LEVEL: ${DOCKPULSE_LOG_LEVEL:-info}
@@ -41,10 +41,10 @@ services:
       - proxy
     # Expose the controller on the host's docker network only. The
     # operator's reverse proxy joins the `proxy` network and proxies
-    # to controller:8080. Uncomment to also publish on the host for
-    # direct access (debugging only — never expose 8080 publicly).
+    # to controller:9787. Uncomment to also publish on the host for
+    # direct access (debugging only — never expose 9787 publicly).
     # ports:
-    #   - "127.0.0.1:8080:8080"
+    #   - "127.0.0.1:9787:9787"
     healthcheck:
       test: ["CMD", "/usr/local/bin/dockpulse", "--mode=controller", "--version"]
       interval: 30s
@@ -55,7 +55,7 @@ services:
 networks:
   proxy:
     # The operator's reverse proxy joins this network and proxies to
-    # controller:8080. This is intentionally an external network so
+    # controller:9787. This is intentionally an external network so
     # it can be created once and shared with the reverse proxy.
     name: ${DOCKPULSE_PROXY_NETWORK:-dockpulse_proxy}
 

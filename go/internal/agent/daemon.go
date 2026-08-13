@@ -569,11 +569,19 @@ func validate(cfg config.Agent) error {
 	if strings.TrimSpace(cfg.Name) == "" {
 		return errors.New("--name is required in agent mode")
 	}
-	if _, err := url.Parse(cfg.ControllerURL); err != nil {
+	parsed, err := url.Parse(cfg.ControllerURL)
+	if err != nil {
 		return fmt.Errorf("invalid --controller URL: %w", err)
 	}
-	if !strings.HasPrefix(cfg.ControllerURL, "https://") {
-		return errors.New("--controller must use https:// in production")
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("--controller must use http:// or https://")
+	}
+	// HTTPS is the default. http:// is only acceptable for
+	// obviously-local hosts (loopback, RFC1918, link-local, .local,
+	// .lan) and only when the operator has not explicitly opted
+	// in via --allow-insecure-controller for everything else.
+	if parsed.Scheme == "http" && !cfg.AllowInsecureController && !isLocalHost(parsed.Hostname()) {
+		return errors.New("--controller must use https:// unless the host is local (loopback, RFC1918, link-local, .local, .lan). Use --allow-insecure-controller to test against an arbitrary http:// host")
 	}
 	if cfg.DockerHost == "" {
 		return errors.New("--docker must not be empty")
@@ -601,4 +609,35 @@ func validate(cfg config.Agent) error {
 		_ = conn.Close()
 	}
 	return nil
+}
+
+// isLocalHost reports whether h is an obviously-local hostname —
+// either an IP literal in a loopback / private / link-local
+// range, or a name ending in .local or .lan (mDNS / typical
+// home-router suffixes). Anything else requires https:// unless
+// the operator has explicitly opted in via
+// --allow-insecure-controller.
+func isLocalHost(h string) bool {
+	if h == "" {
+		return false
+	}
+	lower := strings.ToLower(h)
+	if lower == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return true
+		}
+		if ip.IsPrivate() {
+			return true
+		}
+		// 169.254.0.0/16 is link-local but IsPrivate() returns false
+		// for it; isLinkLocalUnicast() catches it above.
+		return false
+	}
+	if strings.HasSuffix(lower, ".local") || strings.HasSuffix(lower, ".lan") {
+		return true
+	}
+	return false
 }

@@ -16,8 +16,8 @@ func TestLoadControllerDefaults(t *testing.T) {
 	if c.Mode != ModeController {
 		t.Fatalf("expected ModeController, got %s", c.Mode)
 	}
-	if c.Listen != ":8080" {
-		t.Fatalf("expected default listen :8080, got %s", c.Listen)
+	if c.Listen != ":9787" {
+		t.Fatalf("expected default listen :9787, got %s", c.Listen)
 	}
 }
 

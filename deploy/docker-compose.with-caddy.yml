@@ -40,7 +40,7 @@ services:
     restart: unless-stopped
     command:
       - "--mode=controller"
-      - "--listen=:8080"
+      - "--listen=:9787"
       - "--db=/data/dockpulse.db"
     environment:
       DOCKPULSE_LOG_LEVEL: ${DOCKPULSE_LOG_LEVEL:-info}
