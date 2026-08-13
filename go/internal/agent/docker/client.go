@@ -25,10 +25,13 @@ type Client struct {
 }
 
 // New constructs a Client for the given Docker base URL (e.g.
-// "http://127.0.0.1:2375" or "unix:///var/run/docker.sock" —
-// note: the unix scheme requires net.UnixListener transport and
-// is not yet wired; the agent is expected to use a socket proxy
-// reachable over HTTP for the Phase 1 release).
+// "tcp://127.0.0.1:2375", "http://127.0.0.1:2375", or
+// "unix:///var/run/docker.sock"). The Docker Engine HTTP API is
+// served over plain TCP, and the CLI treats tcp:// as an alias
+// for http://, so we normalise it here. Note: the unix scheme
+// requires a net.UnixListener transport and is not yet wired; the
+// agent is expected to use a socket proxy reachable over HTTP for
+// the Phase 1 release.
 func New(base string) (*Client, error) {
 	if base == "" {
 		return nil, fmt.Errorf("docker: empty base URL")
@@ -37,8 +40,14 @@ func New(base string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker: parse base: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "unix" {
-		return nil, fmt.Errorf("docker: unsupported scheme %q (expected http, https, or unix)", u.Scheme)
+	switch u.Scheme {
+	case "tcp":
+		u.Scheme = "http"
+		base = u.String()
+	case "http", "https", "unix":
+		// ok
+	default:
+		return nil, fmt.Errorf("docker: unsupported scheme %q (expected http, https, tcp, or unix)", u.Scheme)
 	}
 	tr := &http.Transport{
 		ResponseHeaderTimeout: 10 * time.Second,
