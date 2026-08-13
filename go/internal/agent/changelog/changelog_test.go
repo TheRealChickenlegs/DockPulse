@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,10 @@ func TestFetchGitHub(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/nginx/nginx/releases" {
 			http.NotFound(w, r)
+			return
+		}
+		if strings.Contains(r.URL.EscapedPath(), "%2F") {
+			http.Error(w, "escaped slash must not appear in the request path", http.StatusBadRequest)
 			return
 		}
 		_ = json.NewEncoder(w).Encode([]githubRelease{

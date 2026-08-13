@@ -143,7 +143,14 @@ type githubRelease struct {
 }
 
 func (f *Fetcher) fetchGitHub(ctx context.Context, repo string) ([]Entry, error) {
-	u := f.base + "/repos/" + url.PathEscape(repo) + "/releases?per_page=5"
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" {
+		return nil, fmt.Errorf("github: invalid repo %q", repo)
+	}
+	// Escape owner and name separately: escaping the slash as %2F
+	// breaks GitHub's API (it 404s), while escaping each segment
+	// keeps the path readable to it.
+	u := f.base + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + "/releases?per_page=5"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err

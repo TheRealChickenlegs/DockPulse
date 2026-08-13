@@ -132,8 +132,10 @@ func Run(ctx context.Context, cfg config.Agent) error {
 func (d *Daemon) loop(ctx context.Context) error {
 	heartbeat := time.NewTicker(30 * time.Second)
 	snapshot := time.NewTicker(2 * time.Minute)
+	commandPoll := time.NewTicker(10 * time.Second)
 	defer heartbeat.Stop()
 	defer snapshot.Stop()
+	defer commandPoll.Stop()
 
 	var registryPollC <-chan time.Time
 	if d.Cfg.RegistryPollInterval > 0 {
@@ -159,6 +161,10 @@ func (d *Daemon) loop(ctx context.Context) error {
 		case <-snapshot.C:
 			if err := d.snapshot(ctx); err != nil {
 				d.Log.Warn("snapshot", "err", err)
+			}
+		case <-commandPoll.C:
+			if err := d.pollCommands(ctx); err != nil {
+				d.Log.Warn("command poll", "err", err)
 			}
 		case <-registryPollC:
 			if err := d.pollRegistry(ctx); err != nil {
@@ -270,6 +276,55 @@ func (d *Daemon) sendSnapshot(ctx context.Context, containers []snapshotContaine
 	if res.StatusCode/100 != 2 {
 		respBody, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("snapshot status %d: %s", res.StatusCode, respBody)
+	}
+	return nil
+}
+
+// command is one entry in GET /agent/v1/commands/poll.
+type command struct {
+	Type string `json:"type"`
+}
+
+// pollCommands drains the controller's command queue for this agent.
+// The controller is outbound-only, so the agent polls on a short
+// interval and executes whatever arrives (currently "scan": refresh
+// the snapshot, heartbeat, and registry check immediately).
+func (d *Daemon) pollCommands(ctx context.Context) error {
+	req, err := d.newSignedRequest(ctx, http.MethodGet, "/agent/v1/commands/poll", nil)
+	if err != nil {
+		return err
+	}
+	res, err := d.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _, _ = io.Copy(io.Discard, res.Body); _ = res.Body.Close() }()
+	if res.StatusCode/100 != 2 {
+		respBody, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("command poll status %d: %s", res.StatusCode, respBody)
+	}
+	var payload struct {
+		Commands []command `json:"commands"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		return fmt.Errorf("command poll decode: %w", err)
+	}
+	for _, c := range payload.Commands {
+		switch c.Type {
+		case "scan":
+			d.Log.Info("scan requested by controller")
+			if err := d.tick(ctx); err != nil {
+				d.Log.Warn("scan tick", "err", err)
+			}
+			if err := d.snapshot(ctx); err != nil {
+				d.Log.Warn("scan snapshot", "err", err)
+			}
+			if err := d.pollRegistry(ctx); err != nil {
+				d.Log.Warn("scan registry poll", "err", err)
+			}
+		default:
+			d.Log.Warn("unknown command", "type", c.Type)
+		}
 	}
 	return nil
 }

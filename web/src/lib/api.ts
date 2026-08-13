@@ -161,6 +161,11 @@ export const api = {
 		request<{ containers: ContainerListItem[] }>(
 			`/api/v1/servers/${encodeURIComponent(serverId)}/containers`
 		),
+	refreshServer: (serverId: string) =>
+		request<{ ok: boolean }>(`/api/v1/servers/${encodeURIComponent(serverId)}/refresh`, {
+			method: 'POST',
+			auth: true
+		}),
 	createEnrollmentToken: (body: { server_name: string; ttl_hours: number }) =>
 		request<{
 			token: string;

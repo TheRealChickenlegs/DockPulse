@@ -5,9 +5,9 @@
 	import { session } from '$lib/stores';
 
 	let servers: ServerListItem[] = $state([]);
-	let selectedId: string = $state('');
 	let loading = $state(true);
 	let error: string | null = $state(null);
+	let scanning: Set<string> = $state(new Set());
 
 	async function refresh() {
 		loading = true;
@@ -15,13 +15,25 @@
 		try {
 			const res = await api.listServers();
 			servers = res.servers;
-			if (servers.length > 0 && !selectedId) {
-				selectedId = servers[0].id;
-			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load servers';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function scan(id: string) {
+		if (scanning.has(id)) return;
+		scanning.add(id);
+		try {
+			await api.refreshServer(id);
+			// The agent picks the command up within ~10s; reload the
+			// list shortly after so the refreshed snapshot shows up.
+			setTimeout(() => refresh(), 12_000);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to request scan';
+		} finally {
+			scanning.delete(id);
 		}
 	}
 
@@ -52,21 +64,30 @@
 	{:else}
 		<div class="grid">
 			{#each servers as server (server.id)}
-				<button
-					type="button"
-					class="card"
-					class:selected={selectedId === server.id}
-					onclick={() => (selectedId = server.id)}
-				>
+				<div class="card">
+					<a
+						class="stretched"
+						href={resolve(`/containers?server=${server.id}`)}
+						aria-label="Show {server.name} containers"
+					></a>
 					<div class="card-head">
 						<div class="card-title">
 							<span class="dot" data-status={server.status}></span>
 							{server.name}
 						</div>
-						<div class="card-meta">
-							{server.container_count} container{server.container_count === 1 ? '' : 's'} ·
-							{server.running_count} running
-						</div>
+						<button
+							type="button"
+							class="scan"
+							disabled={scanning.has(server.id)}
+							onclick={() => scan(server.id)}
+							title="Trigger a new scan of this server's containers"
+						>
+							{scanning.has(server.id) ? 'Scanning…' : 'Scan'}
+						</button>
+					</div>
+					<div class="card-meta">
+						{server.container_count} container{server.container_count === 1 ? '' : 's'} ·
+						{server.running_count} running
 					</div>
 					<div class="card-detail">
 						{#if server.hostname}<div>host: <code>{server.hostname}</code></div>{/if}
@@ -78,7 +99,7 @@
 							<div>last seen: <em>never</em></div>
 						{/if}
 					</div>
-				</button>
+				</div>
 			{/each}
 		</div>
 	{/if}
@@ -129,6 +150,7 @@
 		gap: 0.9rem;
 	}
 	.card {
+		position: relative;
 		text-align: left;
 		background: var(--bg-1);
 		border: 1px solid var(--border);
@@ -141,9 +163,32 @@
 	.card:hover {
 		border-color: rgba(129, 140, 248, 0.5);
 	}
-	.card.selected {
-		border-color: var(--accent-1);
-		box-shadow: 0 0 0 1px var(--accent-1) inset;
+	.stretched::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: inherit;
+	}
+	.scan {
+		position: relative;
+		z-index: 1;
+		font: inherit;
+		font-size: 0.75rem;
+		font-weight: 600;
+		padding: 0.25rem 0.6rem;
+		background: transparent;
+		color: var(--fg-1);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+	}
+	.scan:hover:not(:disabled) {
+		color: var(--fg-0);
+		border-color: rgba(129, 140, 248, 0.5);
+	}
+	.scan:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 	.card-head {
 		display: flex;

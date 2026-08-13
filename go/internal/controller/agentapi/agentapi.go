@@ -6,7 +6,7 @@
 //	POST /agent/v1/containers/snapshot - container state batch
 //	POST /agent/v1/updates/report      - detected updates (Phase 2)
 //	POST /agent/v1/changelog/upload    - changelog entries (Phase 2)
-//	GET  /agent/v1/commands/poll       - long-poll for apply/ignore commands (Phase 6)
+//	GET  /agent/v1/commands/poll       - drain pending commands (e.g. "scan")
 //	POST /agent/v1/commands/ack        - apply/ignore ack (Phase 6)
 //
 // All endpoints except /enroll require mTLS using a client
@@ -42,6 +42,10 @@ type Server struct {
 	CA  *agentca.CA
 	Log *slog.Logger
 
+	// Commands is the queue UI-initiated commands (e.g. "scan now")
+	// are appended to; agents drain it via /commands/poll.
+	Commands *CommandQueue
+
 	// NonceStore guards against replay of HMAC-signed payloads.
 	// Entries expire after the max clock skew window.
 	NonceStore *NonceStore
@@ -53,6 +57,7 @@ func New(database *sql.DB, ca *agentca.CA, log *slog.Logger) *Server {
 		DB:         database,
 		CA:         ca,
 		Log:        log.With("subsystem", "agent_api"),
+		Commands:   NewCommandQueue(),
 		NonceStore: NewNonceStore(10 * time.Minute),
 	}
 }
@@ -384,6 +389,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.Handle("/agent/v1/containers/snapshot", s.requireAgent(http.HandlerFunc(s.HandleContainerSnapshot)))
 	mux.Handle("/agent/v1/updates/report", s.requireAgent(http.HandlerFunc(s.HandleUpdatesReport)))
 	mux.Handle("/agent/v1/changelog/upload", s.requireAgent(http.HandlerFunc(s.HandleChangelogUpload)))
+	mux.Handle("/agent/v1/commands/poll", s.requireAgent(http.HandlerFunc(s.HandleCommandsPoll)))
 }
 
 // requireAgent is the mTLS middleware. It runs only on HTTPS in

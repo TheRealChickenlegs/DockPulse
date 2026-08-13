@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
 	import { api, type ServerListItem, type ContainerListItem, type ChangelogEntry } from '$lib/api';
 
@@ -13,6 +14,7 @@
 	let changelog: ChangelogEntry[] = $state([]);
 	let loadingChangelog = $state(false);
 	let changelogError: string | null = $state(null);
+	let scanning = $state(false);
 
 	async function loadServers() {
 		loadingServers = true;
@@ -21,7 +23,9 @@
 			const res = await api.listServers();
 			servers = res.servers;
 			if (servers.length > 0 && !selectedId) {
-				selectedId = servers[0].id;
+				const preset = $page.url.searchParams.get('server');
+				const match = preset ? servers.find((s) => s.id === preset) : undefined;
+				selectedId = (match ?? servers[0]).id;
 				await loadContainers(selectedId);
 			}
 		} catch (err) {
@@ -30,6 +34,16 @@
 			loadingServers = false;
 		}
 	}
+
+	// Follow links from the servers page: if the URL gains a
+	// ?server= param (e.g. via SvelteKit client-side navigation),
+	// select that server without waiting for the next mount.
+	$effect(() => {
+		const preset = $page.url.searchParams.get('server');
+		if (preset && preset !== selectedId && servers.some((s) => s.id === preset)) {
+			selectedId = preset;
+		}
+	});
 
 	async function loadContainers(id: string) {
 		loadingContainers = true;
@@ -41,6 +55,23 @@
 			containers = [];
 		} finally {
 			loadingContainers = false;
+		}
+	}
+
+	async function scanNow() {
+		if (!selectedId || scanning) return;
+		scanning = true;
+		try {
+			await api.refreshServer(selectedId);
+			// The agent picks the command up within ~10s; reload a few
+			// times so the refreshed snapshot shows up without a manual
+			// refresh.
+			setTimeout(() => loadContainers(selectedId), 3000);
+			setTimeout(() => loadServers(), 13_000);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to request scan';
+		} finally {
+			scanning = false;
 		}
 	}
 
@@ -130,15 +161,22 @@
 	</aside>
 
 	<section class="pane">
-		<header>
-			<h1>{servers.find((s) => s.id === selectedId)?.name ?? 'Containers'}</h1>
-			<p class="muted">
-				{#if selectedId}
-					{containers.length} container{containers.length === 1 ? '' : 's'} · updates and apply land in Phase 2+
-				{:else}
-					Pick a server on the left to see its containers.
-				{/if}
-			</p>
+		<header class="pane-head">
+			<div>
+				<h1>{servers.find((s) => s.id === selectedId)?.name ?? 'Containers'}</h1>
+				<p class="muted">
+					{#if selectedId}
+						{containers.length} container{containers.length === 1 ? '' : 's'} · snapshots refresh every 2 minutes
+					{:else}
+						Pick a server on the left to see its containers.
+					{/if}
+				</p>
+			</div>
+			{#if selectedId}
+				<button type="button" class="scan" onclick={scanNow} disabled={scanning} title="Trigger a new scan now">
+					{scanning ? 'Scanning…' : 'Scan now'}
+				</button>
+			{/if}
 		</header>
 
 		{#if error}
@@ -146,7 +184,7 @@
 		{:else if loadingContainers}
 			<p class="muted">Loading…</p>
 		{:else if containers.length === 0}
-			<p class="muted">No containers cached for this server yet. The agent reports every 2 minutes.</p>
+			<p class="muted">No containers cached for this server yet. Hit “Scan now” to fetch them immediately.</p>
 		{:else}
 			<div class="grid">
 				{#each containers as c (c.id)}
@@ -292,11 +330,35 @@
 		background: var(--fg-1);
 		display: inline-block;
 	}
-	.pane header {
+	.pane-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
 		margin-bottom: 1rem;
 	}
 	.pane h1 {
 		margin: 0 0 0.2rem;
+	}
+	.scan {
+		font: inherit;
+		font-size: 0.8rem;
+		font-weight: 600;
+		padding: 0.35rem 0.8rem;
+		background: transparent;
+		color: var(--fg-1);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.scan:hover:not(:disabled) {
+		color: var(--fg-0);
+		border-color: rgba(129, 140, 248, 0.5);
+	}
+	.scan:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 	.grid {
 		display: grid;
