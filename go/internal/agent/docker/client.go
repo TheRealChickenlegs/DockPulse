@@ -92,13 +92,23 @@ func (c *Client) Ping(ctx context.Context) (*Version, error) {
 // Container is the per-container result of GET /containers/json.
 type Container struct {
 	ID      string            `json:"Id"`
-	Name    string            `json:"Names"`
+	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
 	ImageID string            `json:"ImageID"`
 	State   string            `json:"State"`
 	Status  string            `json:"Status"`
 	Created int64             `json:"Created"`
 	Labels  map[string]string `json:"Labels"`
+}
+
+// Name returns the first name Docker assigned to the container,
+// with the leading '/' removed. /containers/json reports Names as a
+// list because Docker supports multiple (aliased) names.
+func (c Container) Name() string {
+	if len(c.Names) == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(c.Names[0], "/")
 }
 
 // ListContainers queries GET /containers/json?all=1 and returns
@@ -128,12 +138,6 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	return c.client.Do(req)
-}
-
-// StripNamePrefix trims the leading '/' that Docker applies to
-// container names in /containers/json.
-func StripNamePrefix(s string) string {
-	return strings.TrimPrefix(s, "/")
 }
 
 // Image is the subset of GET /images/{id}/json the agent needs to

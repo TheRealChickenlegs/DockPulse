@@ -206,7 +206,7 @@ func (d *Daemon) snapshot(ctx context.Context) error {
 		}
 		out = append(out, snapshotContainer{
 			DockerID:    c.ID,
-			Name:        docker.StripNamePrefix(c.Name),
+			Name:        c.Name(),
 			ImageRef:    imageRef,
 			ImageDigest: c.ImageID,
 			State:       c.State,
