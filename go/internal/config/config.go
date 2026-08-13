@@ -6,9 +6,9 @@
 package config
 
 import (
-	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
