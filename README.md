@@ -47,6 +47,30 @@ The controller listens on all interfaces by default. From another machine on the
 
 For end-to-end testing with TLS and the reverse proxy, see `deploy/README.md` and `docs/AGENT_SETUP.md`.
 
+## Pulling the published image
+
+The Docker image is built and pushed to GHCR on every push to `main` and signed with [cosign](https://github.com/sigstore/cosign) (keyless OIDC). Tags:
+
+| Tag | Meaning |
+| --- | --- |
+| `latest` | The most recent main build. |
+| `edge` | Alias for `latest` (familiar to users of edge-release channels). |
+| `edge-<sha>` | Pinned to a specific main commit (short SHA). |
+| `main-<sha>` | Same as `edge-<sha>`; both names point to the same digest. |
+| `vX.Y.Z` | Released by `git tag vX.Y.Z && git push --tags`. Built by the `release.yml` workflow. |
+
+```bash
+docker pull ghcr.io/therealchickenlegs/dockpulse:latest
+docker pull ghcr.io/therealchickenlegs/dockpulse:edge-79cb1c6
+docker pull ghcr.io/therealchickenlegs/dockpulse:v0.3.0
+
+# Verify the signature
+cosign verify \
+  --certificate-identity-regexp 'https://github.com/TheRealChickenlegs/DockPulse' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  ghcr.io/therealchickenlegs/dockpulse:latest
+```
+
 ## Architecture
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

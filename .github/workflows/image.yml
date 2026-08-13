@@ -51,9 +51,19 @@ jobs:
             echo "tags=ghcr.io/therealchickenlegs/dockpulse:pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
             echo "push=false" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "tags=ghcr.io/therealchickenlegs/dockpulse:edge" >> "$GITHUB_OUTPUT"
-            echo "tags=ghcr.io/therealchickenlegs/dockpulse:edge-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-            echo "tags=ghcr.io/therealchickenlegs/dockpulse:main-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            # Tags pushed on every main build:
+            #   latest         — the most recent main build (alias for `edge`)
+            #   edge           — the most recent main build
+            #   edge-<sha>     — pinned to this commit's short SHA
+            #   main-<sha>     — pinned to this commit's short SHA
+            # All four tags point at the same digest; a single cosign
+            # signature covers them all.
+            {
+              echo "tags=ghcr.io/therealchickenlegs/dockpulse:latest"
+              echo "tags=ghcr.io/therealchickenlegs/dockpulse:edge"
+              echo "tags=ghcr.io/therealchickenlegs/dockpulse:edge-${SHORT_SHA}"
+              echo "tags=ghcr.io/therealchickenlegs/dockpulse:main-${SHORT_SHA}"
+            } >> "$GITHUB_OUTPUT"
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "tags=ghcr.io/therealchickenlegs/dockpulse:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
@@ -87,9 +97,9 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: '1'
         # Sign by digest so we never sign a tag that the registry
-        # hasn't yet propagated. The published tags (edge, edge-<sha>,
-        # main-<sha>) all point to the same digest so a single
-        # signature covers all of them.
+        # hasn't yet propagated. The published tags (latest, edge,
+        # edge-<sha>, main-<sha>) all point to the same digest so a
+        # single signature covers all of them.
         run: |
           DIGEST="${{ steps.build.outputs.digest }}"
           echo "Signing digest ${DIGEST}"
