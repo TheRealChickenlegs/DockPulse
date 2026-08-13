@@ -16,13 +16,16 @@ permissions:
   contents: read
   packages: write
   id-token: write
+  # Required by actions/attest-build-provenance to record the
+  # SLSA provenance statement in GitHub's Attestations API.
+  attestations: write
 
 jobs:
   build:
     name: Build and push image
     runs-on: ubuntu-22.04
     timeout-minutes: 30
-    # PRs from forks cannot push to GHCR or sign with OIDC; build only.
+    # PRs from forks cannot push to GHCR or record attestations; build only.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v7
@@ -55,19 +58,15 @@ jobs:
           # Push only on main pushes (and on workflow_dispatch),
           # never on PR builds from forks.
           push: ${{ github.event_name != 'pull_request' }}
-          # Tags are written as a YAML literal multiline string.
-          # Earlier revisions wrote them via `echo "tags=..." >>
-          # $GITHUB_OUTPUT` which made GitHub Actions concatenate
-          # repeated `tags=` writes with commas, so the action
-          # treated the whole list as a single tag name — and only
-          # the last value survived. Inlining the list here is the
-          # common pattern (matches e.g. docker/build-push-action's
-          # own examples).
+          # Only two moving tags: latest is the stable pointer, edge
+          # is the newest build. Per-commit sha tags were dropped so
+          # the GHCR tag list stops accumulating (latest+edge share a
+          # digest, so they appear as one version in the UI). Tags
+          # are inlined as a YAML literal so the action receives a
+          # real list rather than a comma-joined single tag.
           tags: |
             ghcr.io/therealchickenlegs/dockpulse:latest
             ghcr.io/therealchickenlegs/dockpulse:edge
-            ghcr.io/therealchickenlegs/dockpulse:edge-${{ github.sha }}
-            ghcr.io/therealchickenlegs/dockpulse:main-${{ github.sha }}
           build-args: |
             VERSION=${{ github.sha }}
             COMMIT=${{ github.sha }}
@@ -77,19 +76,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Install cosign
+      # SLSA provenance via GitHub's Attestations API. This replaces
+      # cosign: GHCR does not implement the OCI Referrers API, so
+      # cosign had to store signatures as sha256-<digest>.sig tags
+      # which cluttered the package listing. attest-build-provenance
+      # records the provenance with GitHub instead — visible on the
+      # release/package page but never as a registry tag.
+      - name: Attest build provenance
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign image with cosign (keyless OIDC)
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          COSIGN_EXPERIMENTAL: '1'
-        # Sign by digest so we never sign a tag that the registry
-        # hasn't yet propagated. The published tags (latest, edge,
-        # edge-<sha>, main-<sha>) all point to the same digest so a
-        # single signature covers all of them.
-        run: |
-          DIGEST="${{ steps.build.outputs.digest }}"
-          echo "Signing digest ${DIGEST}"
-          cosign sign --yes "ghcr.io/therealchickenlegs/dockpulse@${DIGEST}"
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/therealchickenlegs/dockpulse
+          subject-digest: ${{ steps.build.outputs.digest }}

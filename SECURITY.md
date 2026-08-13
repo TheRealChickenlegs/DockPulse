@@ -33,7 +33,7 @@ DockPulse is designed with the assumption that the controller may be exposed to 
 - **All agent payloads** are HMAC-signed with per-agent secrets; replays within a 5-minute window are rejected via nonce store.
 - **Registry credentials** are stored encrypted on the agent host and never transmitted to the controller.
 - **The Docker socket** is never mounted directly into any container. Agents access Docker through `tecnativa/docker-socket-proxy` with `CONTAINERS=1, IMAGES=1, POST=0`, bound to `127.0.0.1`.
-- **Supply chain:** release images are signed with [cosign](https://github.com/sigstore/cosign) and an SBOM is attached to each release. CI runs CodeQL, Trivy, and `govulncheck` on every PR.
+- **Supply chain:** each build records SLSA provenance via GitHub's `attest-build-provenance`, and an SBOM is attached to each release. CI runs CodeQL, Trivy, and `govulncheck` on every PR.
 
 ## Hardening checklist for operators
 

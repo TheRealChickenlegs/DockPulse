@@ -68,7 +68,7 @@ It does **not** cover:
 
 ### T9 — Supply-chain compromise
 
-**Mitigation:** Cosign-signed images, SLSA provenance, pinned base images (distroless), Dependabot, CodeQL, Trivy, `govulncheck`. Multi-party review required for changes to the agent API and the enrollment flow.
+**Mitigation:** SLSA provenance via GitHub's `attest-build-provenance`, pinned base images (distroless), Dependabot, CodeQL, Trivy, `govulncheck`. Multi-party review required for changes to the agent API and the enrollment flow.
 
 ### T10 — Privilege escalation from agent to controller
 

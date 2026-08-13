@@ -9,10 +9,12 @@ permissions:
   contents: write
   packages: write
   id-token: write
+  # Required by actions/attest-build-provenance.
+  attestations: write
 
 jobs:
   build-push:
-    name: Build, sign, publish
+    name: Build, publish, attest
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -57,20 +59,14 @@ jobs:
           provenance: true
           sbom: true
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign images with cosign
-        env:
-          COSIGN_EXPERIMENTAL: '1'
-        # Sign by digest, not by tag, so we never sign a tag that
-        # the registry hasn't yet propagated. The published tags
-        # (version, latest) all point to the same digest so a single
-        # signature covers all of them.
-        run: |
-          DIGEST="${{ steps.build.outputs.digest }}"
-          echo "Signing digest ${DIGEST}"
-          cosign sign --yes "ghcr.io/therealchickenlegs/dockpulse@${DIGEST}"
+      # SLSA provenance via GitHub's Attestations API (replaces
+      # cosign — GHCR has no OCI Referrers API, so cosign stored
+      # signatures as cluttering sha256-<digest>.sig tags).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/therealchickenlegs/dockpulse
+          subject-digest: ${{ steps.build.outputs.digest }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3

@@ -49,26 +49,21 @@ For end-to-end testing with TLS and the reverse proxy, see `deploy/README.md` an
 
 ## Pulling the published image
 
-The Docker image is built and pushed to GHCR on every push to `main` and signed with [cosign](https://github.com/sigstore/cosign) (keyless OIDC). Tags:
+The Docker image is built and pushed to GHCR on every push to `main`. Each build records SLSA provenance via GitHub's [attest-build-provenance](https://github.com/actions/attest-build-provenance). Tags:
 
 | Tag | Meaning |
 | --- | --- |
 | `latest` | The most recent main build. |
 | `edge` | Alias for `latest` (familiar to users of edge-release channels). |
-| `edge-<sha>` | Pinned to a specific main commit (short SHA). |
-| `main-<sha>` | Same as `edge-<sha>`; both names point to the same digest. |
 | `vX.Y.Z` | Released by `git tag vX.Y.Z && git push --tags`. Built by the `release.yml` workflow. |
 
 ```bash
 docker pull ghcr.io/therealchickenlegs/dockpulse:latest
-docker pull ghcr.io/therealchickenlegs/dockpulse:edge-79cb1c6
 docker pull ghcr.io/therealchickenlegs/dockpulse:v0.3.0
 
-# Verify the signature
-cosign verify \
-  --certificate-identity-regexp 'https://github.com/TheRealChickenlegs/DockPulse' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  ghcr.io/therealchickenlegs/dockpulse:latest
+# Verify the provenance for the current build
+gh attestation verify ghcr.io/therealchickenlegs/dockpulse:latest \
+  --owner TheRealChickenlegs
 ```
 
 ## Architecture
