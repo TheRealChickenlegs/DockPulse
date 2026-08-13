@@ -10,13 +10,15 @@
 #   3. Update AGENT_NAME and CONTROLLER_URL below.
 #   4. docker compose -f deploy/docker-compose.agent.yml up -d
 #
-# Optional: raise Docker Hub's pull rate limit with a personal access
-# token. Create one at https://hub.docker.com/settings/security (read-only
-# scope is enough), then:
-#        printf '<USERNAME>:<PAT>' > ./agent-data/registry.cred
-#        chmod 600 ./agent-data/registry.cred
-#        # uncomment --registry-token-file below (and the REGISTRY_CRED_FILE
-#        # env default if you prefer to set it in .env)
+# Optional: authenticate registry pulls to raise rate limits (e.g.
+# Docker Hub's 429s). Create a personal access token at
+# https://hub.docker.com/settings/security (read-only scope is enough),
+# then store one credential file per registry host:
+#        mkdir -p ./agent-data/registry-creds
+#        printf '<USERNAME>:<PAT>' > ./agent-data/registry-creds/docker.io
+#        chmod 700 ./agent-data/registry-creds && chmod 600 ./agent-data/registry-creds/docker.io
+#        # uncomment --registry-credentials-dir below (and the
+#        # REGISTRY_CREDS_DIR env default if you prefer .env)
 #
 # Registry polling runs every REGISTRY_POLL (default 24h). Use the
 # dashboard's "Scan now" button to force an immediate poll.
@@ -55,7 +57,7 @@ services:
       - "--data=/data"
       - "--enroll-token-file=/data/enroll.token"
       - "--registry-poll=${REGISTRY_POLL:-24h}"
-      - "--registry-token-file=${REGISTRY_CRED_FILE:-}"
+      - "--registry-credentials-dir=${REGISTRY_CREDS_DIR:-}"
     environment:
       DOCKPULSE_LOG_LEVEL: ${DOCKPULSE_LOG_LEVEL:-info}
       DOCKPULSE_LOG_FORMAT: json

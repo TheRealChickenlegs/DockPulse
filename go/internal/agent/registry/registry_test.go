@@ -58,22 +58,25 @@ func TestRefString(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	if _, err := New("nginx"); err != nil {
+	if _, err := New("nginx", nil); err != nil {
 		t.Errorf("New(nginx): unexpected error %v", err)
 	}
-	if _, err := New("ghcr.io/user/app"); !errors.Is(err, ErrUnsupported) {
+	if _, err := New("ghcr.io/user/app", nil); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("New(ghcr.io/user/app) = %v, want ErrUnsupported", err)
 	}
-	if _, err := New("nginx@sha256:abc"); !errors.Is(err, ErrUnsupported) {
+	if _, err := New("nginx@sha256:abc", nil); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("New(digest-pinned) = %v, want ErrUnsupported", err)
 	}
 }
 
-func TestNewWithCredential(t *testing.T) {
-	cred := &Credential{Username: "chicken", Token: "pat-secret"}
-	p, err := New("nginx", WithCredential(cred))
+func TestNewAppliesStoreCredential(t *testing.T) {
+	store := &CredentialStore{creds: map[string]Credential{
+		"docker.io": {Username: "chicken", Token: "pat-secret"},
+		"quay.io":   {Username: "robot", Token: "quay-token"},
+	}}
+	p, err := New("nginx", store)
 	if err != nil {
-		t.Fatalf("New(nginx, WithCredential): %v", err)
+		t.Fatalf("New(nginx, store): %v", err)
 	}
 	h, ok := p.(*hub)
 	if !ok {
@@ -82,36 +85,78 @@ func TestNewWithCredential(t *testing.T) {
 	if h.username != "chicken" || h.password != "pat-secret" {
 		t.Errorf("hub credential = %q:%q, want chicken:pat-secret", h.username, h.password)
 	}
-	if _, err := New("ghcr.io/user/app", WithCredential(cred)); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("New(ghcr, WithCredential) = %v, want ErrUnsupported", err)
+
+	for _, ref := range []string{"docker.io/nginx", "index.docker.io/nginx", "registry-1.docker.io/nginx"} {
+		p, err := New(ref, store)
+		if err != nil {
+			t.Fatalf("New(%q, store): %v", ref, err)
+		}
+		h := p.(*hub)
+		if h.username != "chicken" || h.password != "pat-secret" {
+			t.Errorf("New(%q) credential = %q:%q, want chicken:pat-secret", ref, h.username, h.password)
+		}
+	}
+
+	if _, err := New("ghcr.io/user/app", store); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("New(ghcr, store) = %v, want ErrUnsupported", err)
 	}
 }
 
-func TestNewWithNilCredential(t *testing.T) {
-	if _, err := New("nginx", WithCredential(nil)); err != nil {
-		t.Fatalf("New(nginx, WithCredential(nil)): %v", err)
-	}
-}
-
-func TestLoadCredentialFile(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/cred"
-	if err := os.WriteFile(path, []byte("chicken:pat-secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := LoadCredentialFile(path)
+func TestNewWithoutStoreIsAnonymous(t *testing.T) {
+	p, err := New("nginx", nil)
 	if err != nil {
-		t.Fatalf("LoadCredentialFile: %v", err)
+		t.Fatalf("New(nginx): %v", err)
 	}
-	if c.Username != "chicken" || c.Token != "pat-secret" {
-		t.Errorf("credential = %+v, want chicken:pat-secret", c)
+	h := p.(*hub)
+	if h.username != "" || h.password != "" {
+		t.Errorf("hub credential = %q:%q, want anonymous", h.username, h.password)
 	}
 }
 
-func TestLoadCredentialFileErrors(t *testing.T) {
+func TestCanonicalHost(t *testing.T) {
+	for _, in := range []string{"", "docker.io", "index.docker.io", "registry-1.docker.io"} {
+		if got := canonicalHost(in); got != "docker.io" {
+			t.Errorf("canonicalHost(%q) = %q, want docker.io", in, got)
+		}
+	}
+	if got := canonicalHost("ghcr.io"); got != "ghcr.io" {
+		t.Errorf("canonicalHost(ghcr.io) = %q, want ghcr.io", got)
+	}
+}
+
+func TestLoadCredentialDir(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := LoadCredentialFile(dir + "/does-not-exist"); err == nil {
-		t.Fatal("LoadCredentialFile(missing): expected error")
+	for file, body := range map[string]string{
+		"docker.io": "chicken:pat-secret\n",
+		"quay.io":   "robot:quay-token",
+		".ignored":  "should:not-be-loaded",
+	} {
+		if err := os.WriteFile(dir+"/"+file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := LoadCredentialDir(dir)
+	if err != nil {
+		t.Fatalf("LoadCredentialDir: %v", err)
+	}
+	if store.Len() != 2 {
+		t.Errorf("store has %d creds, want 2", store.Len())
+	}
+	c, ok := store.Lookup("docker.io")
+	if !ok || c.Username != "chicken" || c.Token != "pat-secret" {
+		t.Errorf("Lookup(docker.io) = %+v ok=%v, want chicken:pat-secret", c, ok)
+	}
+	if c, ok := store.Lookup("index.docker.io"); !ok || c.Token != "pat-secret" {
+		t.Errorf("Lookup(index.docker.io) = %+v ok=%v, want docker.io credential", c, ok)
+	}
+	if _, ok := store.Lookup("ghcr.io"); ok {
+		t.Error("Lookup(ghcr.io) unexpectedly found")
+	}
+}
+
+func TestLoadCredentialDirErrors(t *testing.T) {
+	if _, err := LoadCredentialDir(t.TempDir() + "/does-not-exist"); err == nil {
+		t.Fatal("LoadCredentialDir(missing dir): expected error")
 	}
 	cases := []struct {
 		name string
@@ -120,15 +165,16 @@ func TestLoadCredentialFileErrors(t *testing.T) {
 		{"no colon", "justatoken\n"},
 		{"empty username", ":token\n"},
 		{"empty token", "user:\n"},
+		{"space in token", "user:two words\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p := dir + "/" + c.name
-			if err := os.WriteFile(p, []byte(c.body), 0o600); err != nil {
+			dir := t.TempDir()
+			if err := os.WriteFile(dir+"/docker.io", []byte(c.body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := LoadCredentialFile(p); err == nil {
-				t.Fatalf("LoadCredentialFile(%s): expected error", p)
+			if _, err := LoadCredentialDir(dir); err == nil {
+				t.Fatalf("LoadCredentialDir(%s): expected error", c.name)
 			}
 		})
 	}

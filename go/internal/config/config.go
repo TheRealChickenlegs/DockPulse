@@ -57,7 +57,7 @@ type Agent struct {
 	EnrollTokenFile         string // path to a file containing the one-time enrollment token
 	ControllerCAFile        string // path to the controller CA certificate (for pinning)
 	RegistryPollInterval    time.Duration // how often to poll registries for image updates
-	RegistryTokenFile       string // path to a file containing "username:token" for authenticated registry pulls
+	RegistryCredentialsDir  string // directory of per-registry credential files ("username:token" keyed by registry host)
 }
 
 // Config is the resolved configuration for the running process.
@@ -155,7 +155,7 @@ func Load(args []string) (any, error) {
 	// polls the registry immediately when the operator wants an
 	// up-to-date check.
 	registryPoll := fs.Duration("registry-poll", 24*time.Hour, "How often to poll registries for image updates (agent mode). Set to 0 to disable. On-demand scans poll immediately.")
-	registryTokenFile := fs.String("registry-token-file", "", "Path to a file containing 'username:token' for authenticated registry pulls (agent mode). Currently used for Docker Hub to raise the unauthenticated rate limit. Secret - keep the file mode 0600.")
+	registryCredsDir := fs.String("registry-credentials-dir", "", "Directory of registry credential files (agent mode). Each file is named by registry host (e.g. docker.io) and contains one line 'username:token'. Secrets - keep the directory mode 0700.")
 
 	showVersion := fs.Bool("version", false, "Print version and exit")
 
@@ -209,7 +209,7 @@ func Load(args []string) (any, error) {
 			EnrollTokenFile:         *tokenFile,
 			ControllerCAFile:        *controllerCA,
 			RegistryPollInterval:    *registryPoll,
-			RegistryTokenFile:       *registryTokenFile,
+			RegistryCredentialsDir:  *registryCredsDir,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown mode %q (expected controller or agent)", *modeStr)

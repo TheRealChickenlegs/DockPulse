@@ -27,14 +27,12 @@ type Provider interface {
 	ResolveDigest(ctx context.Context, repo, tag string) (string, error)
 }
 
-// Option configures a provider created by New.
-type Option func(Provider)
-
 // New returns the provider for the given fully-qualified image
 // reference, or ErrUnsupported when no provider is implemented for
 // its registry host. A digest-pinned reference (no tag) is not
-// pollable and returns ErrUnsupported.
-func New(ref string, opts ...Option) (Provider, error) {
+// pollable and returns ErrUnsupported. store supplies credentials
+// for the resolved registry host; nil means anonymous pulls.
+func New(ref string, store *CredentialStore) (Provider, error) {
 	r, err := Parse(ref)
 	if err != nil {
 		return nil, err
@@ -44,11 +42,11 @@ func New(ref string, opts ...Option) (Provider, error) {
 	}
 	switch r.Registry {
 	case "", "docker.io", "index.docker.io", "registry-1.docker.io":
-		p := NewHub()
-		for _, o := range opts {
-			o(p)
+		var cred *Credential
+		if c, ok := store.Lookup(canonicalHost(r.Registry)); ok {
+			cred = &c
 		}
-		return p, nil
+		return NewHub(cred), nil
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupported, r.Registry)
 	}

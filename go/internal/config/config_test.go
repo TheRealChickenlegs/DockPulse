@@ -84,11 +84,11 @@ func TestLoadAgentRegistryFlags(t *testing.T) {
 	if a.RegistryPollInterval != 24*time.Hour {
 		t.Errorf("default RegistryPollInterval = %s, want 24h", a.RegistryPollInterval)
 	}
-	if a.RegistryTokenFile != "" {
-		t.Errorf("default RegistryTokenFile = %q, want empty", a.RegistryTokenFile)
+	if a.RegistryCredentialsDir != "" {
+		t.Errorf("default RegistryCredentialsDir = %q, want empty", a.RegistryCredentialsDir)
 	}
 
-	cfg2, err := Load([]string{"--mode=agent", "--controller=https://example.com", "--name=foo", "--data=/tmp/dockpulse", "--registry-poll=6h", "--registry-token-file=/run/secrets/registry.cred"})
+	cfg2, err := Load([]string{"--mode=agent", "--controller=https://example.com", "--name=foo", "--data=/tmp/dockpulse", "--registry-poll=6h", "--registry-credentials-dir=/run/secrets/registry-creds"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,8 +96,8 @@ func TestLoadAgentRegistryFlags(t *testing.T) {
 	if a2.RegistryPollInterval != 6*time.Hour {
 		t.Errorf("RegistryPollInterval = %s, want 6h", a2.RegistryPollInterval)
 	}
-	if a2.RegistryTokenFile != "/run/secrets/registry.cred" {
-		t.Errorf("RegistryTokenFile = %q, want /run/secrets/registry.cred", a2.RegistryTokenFile)
+	if a2.RegistryCredentialsDir != "/run/secrets/registry-creds" {
+		t.Errorf("RegistryCredentialsDir = %q, want /run/secrets/registry-creds", a2.RegistryCredentialsDir)
 	}
 }
 

@@ -32,7 +32,7 @@ DockPulse is designed with the assumption that the controller may be exposed to 
 - **`X-Forwarded-For` trust** is opt-in: the controller ignores the header by default. Operators who front the controller with a reverse proxy must set `--trusted-proxies` (or `DOCKPULSE_TRUSTED_PROXIES`) to the proxy's IP/CIDR so audit logs and rate limits see the real client IP.
 - **Agents** authenticate to the controller with mTLS using certificates issued by the controller's internal CA on first enrollment. The controller's certificate fingerprint is pinned at enrollment.
 - **All agent payloads** are HMAC-signed with per-agent secrets; replays within a 5-minute window are rejected via nonce store.
-- **Registry credentials** (Docker Hub PAT) are read from a mode-`0600` file on the agent host (`--registry-token-file`), held only in the agent's memory, and never transmitted to the controller or logged. They authenticate only the Docker Hub token exchange (see THREAT_MODEL T16).
+- **Registry credentials** (e.g. Docker Hub PATs) are read from mode-`0600` files in a mode-`0700` directory on the agent host (`--registry-credentials-dir`), one file per registry host, held only in the agent's memory, and never transmitted to the controller or logged. Each credential authenticates only its own registry's token exchange (see THREAT_MODEL T16).
 - **The Docker socket** is never mounted directly into any container. Agents access Docker through `tecnativa/docker-socket-proxy` with `CONTAINERS=1, IMAGES=1, POST=0`, bound to `127.0.0.1`.
 - **Supply chain:** each build records SLSA provenance via GitHub's `attest-build-provenance`, and an SBOM is attached to each release. CI runs CodeQL, Trivy, and `govulncheck` on every PR.
 

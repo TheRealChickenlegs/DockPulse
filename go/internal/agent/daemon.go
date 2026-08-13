@@ -92,10 +92,10 @@ type Daemon struct {
 	muReported   sync.Mutex
 	lastReported map[string]string
 
-	// registryCred is the optional credential (Docker Hub PAT) used
-	// to authenticate registry pulls. Loaded once at startup from
-	// --registry-token-file.
-	registryCred *registry.Credential
+	// registryCreds is the optional set of registry credentials (one
+	// per registry host, e.g. a Docker Hub PAT) used to authenticate
+	// pulls. Loaded once at startup from --registry-credentials-dir.
+	registryCreds *registry.CredentialStore
 }
 
 // Run starts the agent and blocks until ctx is cancelled. It
@@ -116,13 +116,13 @@ func Run(ctx context.Context, cfg config.Agent) error {
 		return fmt.Errorf("docker client: %w", err)
 	}
 
-	var registryCred *registry.Credential
-	if cfg.RegistryTokenFile != "" {
-		registryCred, err = registry.LoadCredentialFile(cfg.RegistryTokenFile)
+	var registryCreds *registry.CredentialStore
+	if cfg.RegistryCredentialsDir != "" {
+		registryCreds, err = registry.LoadCredentialDir(cfg.RegistryCredentialsDir)
 		if err != nil {
-			return fmt.Errorf("load registry credential: %w", err)
+			return fmt.Errorf("load registry credentials: %w", err)
 		}
-		logger.Info("registry authentication enabled", "provider", "hub")
+		logger.Info("registry authentication enabled", "hosts", registryCreds.Len())
 	}
 
 	d := &Daemon{
@@ -132,7 +132,7 @@ func Run(ctx context.Context, cfg config.Agent) error {
 		baseURL:          strings.TrimRight(cfg.ControllerURL, "/"),
 		changelogFetcher: changelog.NewFetcher(),
 		lastReported:     map[string]string{},
-		registryCred:     registryCred,
+		registryCreds:    registryCreds,
 	}
 	// Pre-enrollment client: no client cert yet, and /agent/v1/enroll
 	// is the one endpoint the controller accepts without mTLS.
@@ -397,7 +397,7 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 	var uploads []changelogUpload
 
 	for _, t := range seen {
-		provider, err := registry.New(t.imageRef, registry.WithCredential(d.registryCred))
+		provider, err := registry.New(t.imageRef, d.registryCreds)
 		if err != nil {
 			continue
 		}

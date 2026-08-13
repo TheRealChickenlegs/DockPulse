@@ -103,13 +103,13 @@ A compromised or malicious registry (or an attacker who can push to a tag the ag
 
 ### T16 — Registry credential (PAT) disclosure from the agent host
 
-A Docker Hub personal access token stored on an agent host (`--registry-token-file`, one line `username:token`) can be read by anything that can read the agent's data directory, and if exfiltrated it grants the holder the account's Docker Hub pull (and, if scoped higher, push) access.
+A registry personal access token stored on an agent host (`--registry-credentials-dir`, one `username:token` file per registry host) can be read by anything that can read the agent's data directory, and if exfiltrated it grants the holder that account's pull (and, if scoped higher, push) access on the affected registry.
 
 **Mitigation:**
-- The file is only referenced by path; the token is never logged, echoed in config output, or transmitted to the controller. The credential is held in memory for the agent's lifetime and used solely for the Docker Hub token exchange (REGISTRIES.md).
-- The file must be created with mode `0600` (the bundled compose's `agent-data` directory is bound into the container); the credential only leaves the agent host as Basic auth over TLS to `auth.docker.io`.
-- Operators should use a read-only-scoped PAT dedicated to DockPulse so a disclosure cannot push images.
-- The credential is never sent to non-Hub registries; the `hub` provider is the only consumer (T15 remains in force for all other registry traffic).
+- Credentials are only referenced by directory path; they are never logged, echoed in config output, or transmitted to the controller. Each is held in memory for the agent's lifetime and used solely for its own registry's token exchange (REGISTRIES.md).
+- The directory must be created with mode `0700` and each file `0600` (the bundled compose's `agent-data` directory is bound into the container); credentials only leave the agent host as Basic auth over TLS to the registry's token endpoint.
+- Operators should use read-only-scoped PATs dedicated to DockPulse so a disclosure cannot push images.
+- Credentials are never sent to other registries; lookups are keyed by canonical registry host and only the `hub` provider consumes them today (T15 remains in force for all other registry traffic).
 
 ## Residual risk
 

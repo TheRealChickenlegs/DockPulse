@@ -16,20 +16,29 @@
 ## Authenticated pulls (Docker Hub)
 
 Docker Hub rate-limits anonymous pulls by source IP. To raise the
-limit, pass the agent a personal access token:
+limit, give the agent credentials for that registry:
 
 1. Create a PAT at <https://hub.docker.com/settings/security>
    (read-only scope is enough for digest checks).
-2. On the agent host, write it to a file as one line `username:token`:
-   `printf 'chickenlegs:<PAT>' > ./agent-data/registry.cred`
-   and `chmod 600` it.
-3. Start the agent with `--registry-token-file=/data/registry.cred`
-   (the bundled compose wires `REGISTRY_CRED_FILE` for this).
+2. On the agent host, create a credentials directory with one file
+   per registry host, each holding one line `username:token`:
+   `mkdir -p ./agent-data/registry-creds`
+   `printf 'chickenlegs:<PAT>' > ./agent-data/registry-creds/docker.io`
+   then `chmod 700` the directory and `chmod 600` the file.
+3. Start the agent with `--registry-credentials-dir=/data/registry-creds`
+   (the bundled compose wires `REGISTRY_CREDS_DIR` for this).
 
-The credential only authenticates the Docker Hub token exchange; it is
-never sent to any other registry, logged, or transmitted to the
-controller. The token file is read once at agent startup; changing it
-requires an agent restart.
+Other registries follow the same shape as provider support lands:
+add a file named after the registry host (e.g. `ghcr.io`) and the
+agent looks it up per image. Docker Hub's hostnames (`docker.io`,
+`index.docker.io`, `registry-1.docker.io`, and the implicit default)
+all map to the single `docker.io` key. Hostnames for which no
+credential exists fall back to anonymous pulls.
+
+Credentials only authenticate the token exchange for their own
+registry host; they are never sent to another registry, logged, or
+transmitted to the controller. The directory is read once at agent
+startup; changing it requires an agent restart.
 
 ## Polling cadence
 

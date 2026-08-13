@@ -22,8 +22,8 @@ const (
 // bearer token scoped to the repository before the manifest API
 // answers. The token exchange is anonymous for public images by
 // default; when credentials are set (a personal access token via
-// --registry-token-file) the exchange is made as that account, which
-// lifts the unauthenticated pull rate limit.
+// --registry-credentials-dir) the exchange is made as that account,
+// which lifts the unauthenticated pull rate limit.
 type hub struct {
 	client *http.Client
 	// tokenURL, registryURL, and service are injectable for tests.
@@ -36,9 +36,10 @@ type hub struct {
 	password string
 }
 
-// NewHub constructs the Docker Hub provider.
-func NewHub() Provider {
-	return &hub{
+// NewHub constructs the Docker Hub provider. cred authenticates the
+// token exchange when non-nil; nil keeps it anonymous.
+func NewHub(cred *Credential) Provider {
+	h := &hub{
 		client: &http.Client{
 			Timeout: 20 * time.Second,
 			Transport: &http.Transport{
@@ -50,6 +51,11 @@ func NewHub() Provider {
 		registryURL: defaultHubRegistryURL,
 		service:     defaultHubService,
 	}
+	if cred != nil {
+		h.username = cred.Username
+		h.password = cred.Token
+	}
+	return h
 }
 
 type hubTokenResponse struct {
