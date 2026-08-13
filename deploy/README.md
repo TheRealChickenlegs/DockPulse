@@ -80,6 +80,28 @@ docker compose -f deploy/docker-compose.yml up -d
 
 **nginx proxy manager on a different host** — publish the controller port on the host loopback only (uncomment the `ports:` block in `docker-compose.yml`) and point NPM at `host-ip:9787`. Never publish 9787 on `0.0.0.0`.
 
+### Persistence: named volume vs bind mount
+
+The default `docker-compose.yml` uses a Docker named volume (`controller_data`). Docker manages the directory and permissions, so it works out of the box. If you prefer a bind mount (for inspection, host backups, or moving state between hosts), uncomment the bind mount line and **make sure the host directory is writable by the container's nonroot user (UID 65532)**:
+
+```bash
+mkdir -p /path/to/dockpulse-data
+sudo chown 65532:65532 /path/to/dockpulse-data
+# OR
+chmod 777 /path/to/dockpulse-data
+```
+
+If the permissions are wrong the controller will fail fast with a clear hint:
+
+```
+open database: db: cannot create "/data/sub" (permission denied).
+The container runs as nonroot (UID 65532); the host directory mounted
+at "/data/sub" must be writable by that UID (e.g. `chown 65532:65532
+<host-dir>`) or by 0777
+```
+
+On Linux this often comes from a SELinux label that denies the container write access. If `chown` doesn't help, try `chcon -Rt svirt_sandbox_file_t /path/to/dockpulse-data` (or your distro's equivalent).
+
 ## Optional: bundled Caddy
 
 If you don't have a reverse proxy already, the alternative `docker-compose.with-caddy.yml` bundles Caddy with automatic HTTPS.

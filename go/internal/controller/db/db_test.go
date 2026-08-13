@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +103,48 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 migration row, got %d", count)
+	}
+}
+
+func TestOpenCreatesParentDirectory(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	// The parent directory does NOT exist yet.
+	nested := filepath.Join(dir, "nested", "data", "dockpulse.db")
+	conn, err := Open(ctx, nested)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	if _, err := os.Stat(filepath.Dir(nested)); err != nil {
+		t.Fatalf("expected parent dir to be created: %v", err)
+	}
+}
+
+func TestOpenPermissionDeniedGivesHint(t *testing.T) {
+	ctx := context.Background()
+	// Create a read-only parent directory.
+	dir := t.TempDir()
+	roDir := filepath.Join(dir, "ro")
+	if err := os.Mkdir(roDir, 0o500); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+
+	// Skip if running as root (the chmod above won't restrict root).
+	if os.Geteuid() == 0 {
+		t.Skip("test requires a non-root user")
+	}
+
+	_, err := Open(ctx, filepath.Join(roDir, "data", "dockpulse.db"))
+	if err == nil {
+		t.Fatal("expected error from MkdirAll under read-only parent")
+	}
+	msg := err.Error()
+	for _, expect := range []string{"permission denied", "65532", "chown"} {
+		if !strings.Contains(msg, expect) {
+			t.Errorf("error message %q is missing hint %q", msg, expect)
+		}
 	}
 }
