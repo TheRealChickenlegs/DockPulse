@@ -454,11 +454,6 @@ func (d *Daemon) newSignedRequest(ctx context.Context, method, path string, body
 		nonce := randomHex(16)
 		bodyHash := sha256.Sum256(body)
 		mac := hmac.New(sha256.New, d.signingKey)
-		fmt.Fprintf(req.Body.(io.Writer), "") // no-op; body is bytes.NewReader
-		_, _ = io.Copy(io.Discard, req.Body)
-		// re-wrap body after our no-op peek; http.Request body is
-		// consumed by transports, so we must restore it.
-		req.Body = io.NopCloser(bytes.NewReader(body))
 		mac.Write([]byte(intToString(ts)))
 		mac.Write([]byte{'.'})
 		mac.Write([]byte(nonce))
