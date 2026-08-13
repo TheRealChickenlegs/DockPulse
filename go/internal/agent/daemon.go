@@ -72,11 +72,11 @@ type Daemon struct {
 	controllerFingerprint string
 
 	// agentID, serverID, serverName are populated by enroll().
-	mu          sync.Mutex
-	agentID     string
-	serverID    string
-	serverName  string
-	enrolled    bool
+	mu         sync.Mutex
+	agentID    string
+	serverID   string
+	serverName string
+	enrolled   bool
 }
 
 // Run starts the agent and blocks until ctx is cancelled. It
@@ -98,11 +98,14 @@ func Run(ctx context.Context, cfg config.Agent) error {
 	}
 
 	d := &Daemon{
-		Cfg:      cfg,
-		Log:      logger,
-		Docker:   dockerClient,
-		baseURL:  strings.TrimRight(cfg.ControllerURL, "/"),
+		Cfg:     cfg,
+		Log:     logger,
+		Docker:  dockerClient,
+		baseURL: strings.TrimRight(cfg.ControllerURL, "/"),
 	}
+	// Pre-enrollment client: no client cert yet, and /agent/v1/enroll
+	// is the one endpoint the controller accepts without mTLS.
+	d.httpClient = &http.Client{Timeout: 30 * time.Second}
 	if err := d.loadOrEnroll(ctx); err != nil {
 		return fmt.Errorf("enroll: %w", err)
 	}
@@ -196,8 +199,8 @@ func (d *Daemon) sendHeartbeat(ctx context.Context, v *docker.Version, running, 
 		"docker_version":  v.Version,
 		"os":              v.OS,
 		"container_count": total,
-		"running_count":    running,
-		"images":           images,
+		"running_count":   running,
+		"images":          images,
 	})
 	if err != nil {
 		return err
@@ -376,25 +379,16 @@ func (d *Daemon) enroll(ctx context.Context, token, certPath, keyPath, sharedKey
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
-	// 3. Read controller CA from the public TLS endpoint the
-	//    controller serves. We then prompt the operator to
-	//    trust the controller's CA fingerprint in their firstrun
-	//    token. For Phase 1 dev we accept any CA and the operator
-	//    pins the fingerprint via --controller-ca (Phase 2).
-	caPEM, err := d.fetchControllerCAPEM(ctx)
+	// 3. Determine the controller's internal CA fingerprint to pin.
+	//    Over HTTPS the operator provides it via --controller-ca so
+	//    a first-enrollment MITM cannot substitute its own CA. Over
+	//    plain HTTP (allowed only for local hosts) there is no TLS
+	//    identity to pin against; the controller's CA cert returned
+	//    in the enroll response becomes the reference fingerprint.
+	caPin, err := d.controllerCAPin()
 	if err != nil {
-		return fmt.Errorf("fetch controller CA: %w", err)
+		return err
 	}
-	caBlock, _ := pem.Decode(caPEM)
-	if caBlock == nil {
-		return errors.New("agent: invalid controller CA PEM")
-	}
-	caCert, err := x509.ParseCertificate(caBlock.Bytes)
-	if err != nil {
-		return fmt.Errorf("agent: parse controller CA: %w", err)
-	}
-	caFP := sha256.Sum256(caCert.Raw)
-	d.controllerFingerprint = hex.EncodeToString(caFP[:])
 
 	// 4. POST the enrollment request.
 	body, err := json.Marshal(map[string]any{
@@ -403,8 +397,8 @@ func (d *Daemon) enroll(ctx context.Context, token, certPath, keyPath, sharedKey
 		"hostname":       hostnameOrEmpty(),
 		"os":             runtimeOS(),
 		"docker_version": "",
-		"csr":             string(csrPEM),
-		"ca_fingerprint": d.controllerFingerprint,
+		"csr":            string(csrPEM),
+		"ca_fingerprint": caPin,
 	})
 	if err != nil {
 		return err
@@ -438,6 +432,17 @@ func (d *Daemon) enroll(ctx context.Context, token, certPath, keyPath, sharedKey
 	if resp.ClientCert == "" || resp.CACert == "" {
 		return errors.New("enroll response missing cert")
 	}
+
+	caBlock, _ := pem.Decode([]byte(resp.CACert))
+	if caBlock == nil {
+		return errors.New("enroll response: invalid CA cert PEM")
+	}
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		return fmt.Errorf("enroll response: parse CA cert: %w", err)
+	}
+	caSum := sha256.Sum256(caCert.Raw)
+	d.controllerFingerprint = hex.EncodeToString(caSum[:])
 
 	// 5. Persist cert + key + shared key.
 	if err := os.WriteFile(certPath, []byte(resp.ClientCert), 0o600); err != nil {
@@ -490,21 +495,35 @@ func (d *Daemon) newHTTPClient(cert *x509.Certificate, key any) *http.Client {
 	}
 }
 
-func (d *Daemon) fetchControllerCAPEM(ctx context.Context) ([]byte, error) {
-	// The controller doesn't currently expose its CA at a public
-	// endpoint (that lands in Phase 1e). For Phase 1 dev we let
-	// the operator pass the CA via --controller-ca, which is
-	// read at startup. Without that flag, enrollment will fail
-	// — operators must wire the CA into the agent data dir
-	// themselves.
+// controllerCAPin returns the SHA-256 fingerprint of the
+// controller's internal CA to send with the enroll request, or ""
+// when the controller URL is plain HTTP. Over HTTPS the operator
+// must provide the CA via --controller-ca so a first-enrollment
+// MITM cannot substitute its own CA; over plain HTTP (allowed
+// only for local hosts) there is no TLS identity to pin against,
+// and the controller's CA cert from the enroll response is used
+// as the reference instead.
+func (d *Daemon) controllerCAPin() (string, error) {
 	if d.Cfg.ControllerCAFile != "" {
 		b, err := os.ReadFile(d.Cfg.ControllerCAFile)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
-		return b, nil
+		block, _ := pem.Decode(b)
+		if block == nil {
+			return "", errors.New("agent: invalid controller CA PEM")
+		}
+		caCert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return "", fmt.Errorf("agent: parse controller CA: %w", err)
+		}
+		sum := sha256.Sum256(caCert.Raw)
+		return hex.EncodeToString(sum[:]), nil
 	}
-	return nil, errors.New("controller CA file is required for first enrollment (set --controller-ca)")
+	if strings.HasPrefix(d.Cfg.ControllerURL, "https://") {
+		return "", errors.New("controller CA file is required for first enrollment over https (set --controller-ca)")
+	}
+	return "", nil
 }
 
 func (d *Daemon) certFingerprint() string {
