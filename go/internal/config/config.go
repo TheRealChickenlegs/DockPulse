@@ -175,8 +175,14 @@ func Load(args []string) (any, error) {
 		if *controllerURL == "" {
 			return nil, fmt.Errorf("--controller is required in agent mode")
 		}
-		if !strings.HasPrefix(*controllerURL, "https://") {
-			return nil, errors.New("--controller must use https:// in agent mode")
+		// HTTPS-vs-HTTP validation is done in the agent's validate()
+		// so that local hosts (loopback, RFC1918, link-local, .local,
+		// .lan) can be reached over plain HTTP without the
+		// --allow-insecure-controller flag. We only check the scheme
+		// is recognised here.
+		parsed, perr := url.Parse(*controllerURL)
+		if perr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, fmt.Errorf("--controller must be an http:// or https:// URL")
 		}
 		if abs, err := filepath.Abs(*dataDir); err == nil {
 			if strings.HasPrefix(abs, "/proc") || strings.HasPrefix(abs, "/sys") {
