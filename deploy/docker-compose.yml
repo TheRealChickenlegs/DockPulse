@@ -13,11 +13,9 @@
 #   1. Copy `.env.example` to `.env` and edit values as needed.
 #   2. Choose EITHER a named volume (default — works out of the box)
 #      OR a bind mount by commenting/uncommenting the volumes block
-#      below. For bind mounts, ensure the host directory is writable
-#      by UID 65532 (the image's nonroot user):
-#         sudo chown 65532:65532 /path/to/dockpulse-data
-#      Otherwise the container will fail with
-#      "unable to open database file".
+#      below. The container runs as UID 1000:1000, which matches
+#      the typical homelab host UID, so bind mounts from your
+#      regular user-owned directory work without `sudo chown`.
 #   3. Place the controller on a network your reverse proxy can reach
 #      (the included `proxy` network is used by default).
 #   4. Point your reverse proxy at `controller:9787` and apply the
@@ -30,10 +28,11 @@ services:
   controller:
     image: ghcr.io/therealchickenlegs/dockpulse:${DOCKPULSE_IMAGE_TAG:-latest}
     restart: unless-stopped
-    # The image's USER directive is already nonroot:nonroot (UID 65532).
-    # Explicitly pinning it here makes the bind-mount permissions
-    # requirement obvious to anyone reading the file.
-    user: "65532:65532"
+    # The image runs as UID 1000:1000 by default — the typical
+    # homelab host UID. Bind mounts from the host's user-owned
+    # directory work without chown. Override here if your host
+    # uses a different UID.
+    user: "1000:1000"
     command:
       - "--mode=controller"
       - "--listen=:9787"
@@ -52,8 +51,10 @@ services:
       - controller_data:/data
       # ---- Bind mount (uncomment to use) ----
       # - /path/to/dockpulse-data:/data
-      # Then on the host:
-      #   sudo chown 65532:65532 /path/to/dockpulse-data
+      # The host directory must be writable by UID 1000 (or the
+      # override you set above). On most homelab hosts this is true
+      # out of the box because /home/<you>/dockpulse-data is owned
+      # by UID 1000.
     networks:
       - proxy
     # Expose the controller on the host's docker network only. The

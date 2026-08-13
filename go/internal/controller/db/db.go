@@ -47,7 +47,7 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		dir := filepath.Dir(path)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
-				return nil, fmt.Errorf("db: cannot create %q (permission denied). The container runs as nonroot (UID 65532); the host directory mounted at %q must be writable by that UID (e.g. `chown 65532:65532 <host-dir>`) or by 0777", dir, dir)
+				return nil, fmt.Errorf("db: cannot create %q (permission denied). The container runs as UID 1000:1000; the host directory mounted at %q must be writable by that UID", dir, dir)
 			}
 			return nil, fmt.Errorf("db: create parent dir: %w", err)
 		}
@@ -66,7 +66,7 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
 			_ = db.Close()
 			if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.EACCES) {
-				return nil, fmt.Errorf("db: open %q: %w. The container runs as nonroot (UID 65532); the host directory mounted at %q must be writable by that UID (e.g. `chown 65532:65532 <host-dir>`) or by 0777", path, err, filepath.Dir(path))
+				return nil, fmt.Errorf("db: open %q: %w. The container runs as UID 1000:1000; the host directory mounted at %q must be writable by that UID", path, err, filepath.Dir(path))
 			}
 			return nil, fmt.Errorf("db: set busy_timeout: %w", err)
 		}

@@ -56,7 +56,20 @@ RUN cd go && go build \
     ./cmd/dockpulse
 
 # --- Stage 3: distroless runtime --------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+#
+# Use the distroless :latest tag (which runs as root) so we can
+# downgrade to UID 1000:1000 via a USER directive. Many homelab
+# hosts have their user-data bind-mounted to /data, and the
+# default UID on those hosts is 1000. Running as 1000:1000 means
+# bind mounts work out of the box without `sudo chown` to a
+# non-default UID.
+#
+# The distroless static image has no /etc/passwd entry for UID
+# 1000. That's fine — Linux allows running as any UID even
+# without a passwd entry; the only requirement is that the
+# process can read/write the files it needs. The bind mount
+# (and /data on named volumes) is created writable by UID 1000.
+FROM gcr.io/distroless/static-debian12:latest AS runtime
 LABEL org.opencontainers.image.source="https://github.com/TheRealChickenlegs/DockPulse" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="TheRealChickenlegs" \
@@ -66,7 +79,7 @@ LABEL org.opencontainers.image.source="https://github.com/TheRealChickenlegs/Doc
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/dockpulse /usr/local/bin/dockpulse
 
-USER nonroot:nonroot
+USER 1000:1000
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 9787

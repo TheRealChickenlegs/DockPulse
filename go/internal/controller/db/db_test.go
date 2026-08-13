@@ -142,7 +142,7 @@ func TestOpenPermissionDeniedGivesHint(t *testing.T) {
 		t.Fatal("expected error from MkdirAll under read-only parent")
 	}
 	msg := err.Error()
-	for _, expect := range []string{"permission denied", "65532", "chown"} {
+	for _, expect := range []string{"permission denied", "1000"} {
 		if !strings.Contains(msg, expect) {
 			t.Errorf("error message %q is missing hint %q", msg, expect)
 		}

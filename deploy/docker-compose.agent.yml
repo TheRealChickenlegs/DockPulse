@@ -38,6 +38,7 @@ services:
   agent:
     image: ghcr.io/therealchickenlegs/dockpulse:${DOCKPULSE_IMAGE_TAG:-latest}
     restart: unless-stopped
+    user: "1000:1000"
     command:
       - "--mode=agent"
       - "--name=${AGENT_NAME:?Set AGENT_NAME in .env}"

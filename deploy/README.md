@@ -82,25 +82,30 @@ docker compose -f deploy/docker-compose.yml up -d
 
 ### Persistence: named volume vs bind mount
 
-The default `docker-compose.yml` uses a Docker named volume (`controller_data`). Docker manages the directory and permissions, so it works out of the box. If you prefer a bind mount (for inspection, host backups, or moving state between hosts), uncomment the bind mount line and **make sure the host directory is writable by the container's nonroot user (UID 65532)**:
+The default `docker-compose.yml` uses a Docker named volume (`controller_data`). Docker manages the directory and permissions, so it works out of the box. If you prefer a bind mount (for inspection, host backups, or moving state between hosts), uncomment the bind mount line. The container runs as **UID 1000:1000** — the typical homelab host UID — so host directories owned by your regular user (the default) work without `chown`:
 
-```bash
-mkdir -p /path/to/dockpulse-data
-sudo chown 65532:65532 /path/to/dockpulse-data
-# OR
-chmod 777 /path/to/dockpulse-data
+```yaml
+volumes:
+  - /home/you/dockpulse-data:/data
+```
+
+If your host uses a different UID (rare on homelab Linux/macOS), override it in the compose file:
+
+```yaml
+services:
+  controller:
+    user: "1234:1234"   # your host UID
 ```
 
 If the permissions are wrong the controller will fail fast with a clear hint:
 
 ```
 open database: db: cannot create "/data/sub" (permission denied).
-The container runs as nonroot (UID 65532); the host directory mounted
-at "/data/sub" must be writable by that UID (e.g. `chown 65532:65532
-<host-dir>`) or by 0777
+The container runs as UID 1000:1000; the host directory mounted at
+"/data/sub" must be writable by that UID.
 ```
 
-On Linux this often comes from a SELinux label that denies the container write access. If `chown` doesn't help, try `chcon -Rt svirt_sandbox_file_t /path/to/dockpulse-data` (or your distro's equivalent).
+On Linux this often comes from a SELinux label that denies the container write access. If ownership is correct but the error persists, try `chcon -Rt svirt_sandbox_file_t /path/to/dockpulse-data` (or your distro's equivalent).
 
 ## Optional: bundled Caddy
 
