@@ -27,10 +27,26 @@ func TestLoadAgentRequiresController(t *testing.T) {
 	}
 }
 
-func TestLoadAgentRejectsHTTP(t *testing.T) {
-	_, err := Load([]string{"--mode=agent", "--controller=http://example.com", "--name=test", "--data=/tmp"})
+func TestLoadAgentRejectsNonHTTPScheme(t *testing.T) {
+	_, err := Load([]string{"--mode=agent", "--controller=ftp://example.com", "--name=test", "--data=/tmp"})
 	if err == nil {
-		t.Fatal("expected error rejecting http:// in agent mode")
+		t.Fatal("expected error rejecting non-http(s) scheme in agent mode")
+	}
+}
+
+func TestLoadAgentAcceptsLocalHTTP(t *testing.T) {
+	// http:// is accepted at load time for local hosts; the agent's
+	// validate() enforces https:// for non-local hosts.
+	cfg, err := Load([]string{"--mode=agent", "--controller=http://192.168.10.10:9787", "--name=test", "--data=/tmp"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a, ok := cfg.(Agent)
+	if !ok {
+		t.Fatalf("expected Agent, got %T", cfg)
+	}
+	if a.ControllerURL != "http://192.168.10.10:9787" {
+		t.Fatalf("unexpected controller URL: %s", a.ControllerURL)
 	}
 }
 
@@ -89,11 +105,11 @@ func TestAgentStringRedactsCredentials(t *testing.T) {
 
 func TestSplitCSV(t *testing.T) {
 	cases := map[string][]string{
-		"":                  nil,
-		"   ":               nil,
-		"a":                 {"a"},
-		"a,b":               {"a", "b"},
-		" a , b ,":          {"a", "b"},
+		"":                           nil,
+		"   ":                        nil,
+		"a":                          {"a"},
+		"a,b":                        {"a", "b"},
+		" a , b ,":                   {"a", "b"},
 		"10.0.0.0/8, ,172.16.0.0/12": {"10.0.0.0/8", "172.16.0.0/12"},
 	}
 	for in, want := range cases {

@@ -48,8 +48,8 @@ type Controller struct {
 // Agent holds configuration specific to agent mode.
 type Agent struct {
 	Common
-	Name                   string // human-readable name for this agent host
-	ControllerURL          string // controller base URL, e.g. https://dockpulse.example.com
+	Name                    string // human-readable name for this agent host
+	ControllerURL           string // controller base URL, e.g. https://dockpulse.example.com
 	AllowInsecureController bool   // TEST ONLY: allow http:// controllers even when host is not local
 	DockerHost              string // docker daemon URL, e.g. unix:///var/run/docker.sock
 	DataDir                 string // directory for certs, registry creds, state
@@ -190,14 +190,14 @@ func Load(args []string) (any, error) {
 			}
 		}
 		return Agent{
-			Common:                Common{Mode: mode},
-			Name:                  *name,
-			ControllerURL:         *controllerURL,
+			Common:                  Common{Mode: mode},
+			Name:                    *name,
+			ControllerURL:           *controllerURL,
 			AllowInsecureController: *allowInsecureController,
-			DockerHost:            *dockerHost,
-			DataDir:               *dataDir,
-			EnrollTokenFile:       *tokenFile,
-			ControllerCAFile:      *controllerCA,
+			DockerHost:              *dockerHost,
+			DataDir:                 *dataDir,
+			EnrollTokenFile:         *tokenFile,
+			ControllerCAFile:        *controllerCA,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown mode %q (expected controller or agent)", *modeStr)
