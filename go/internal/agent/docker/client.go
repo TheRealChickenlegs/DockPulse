@@ -135,3 +135,39 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 func StripNamePrefix(s string) string {
 	return strings.TrimPrefix(s, "/")
 }
+
+// Image is the subset of GET /images/{id}/json the agent needs to
+// find changelog source hints (OCI labels).
+type Image struct {
+	ID string `json:"Id"`
+	Config struct {
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
+}
+
+// ImageInspect queries GET /images/{id}/json and returns the image
+// configuration. The id may be a digest (sha256:…), ID, or name.
+// Requires the proxy to expose IMAGES=1.
+func (c *Client) ImageInspect(ctx context.Context, id string) (*Image, error) {
+	resp, err := c.get(ctx, "/images/"+url.PathEscape(id)+"/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("docker: /images/%s/json status %d: %s", id, resp.StatusCode, truncateDocker(body, 256))
+	}
+	var img Image
+	if err := json.NewDecoder(resp.Body).Decode(&img); err != nil {
+		return nil, fmt.Errorf("docker: decode /images/%s/json: %w", id, err)
+	}
+	return &img, nil
+}
+
+func truncateDocker(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + "…"
+}

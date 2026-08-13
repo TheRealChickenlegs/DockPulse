@@ -122,6 +122,32 @@ export interface ContainerListItem {
 	updated_at: string;
 }
 
+export interface ChangelogEntry {
+	version: string;
+	source: string;
+	title?: string;
+	url?: string;
+	body?: string;
+	published_at?: string;
+	hash?: string;
+}
+
+export interface UpdateListItem {
+	id: string;
+	image_ref: string;
+	repo: string;
+	tag: string;
+	from_digest: string;
+	to_digest: string;
+	status: 'pending' | 'ignored' | 'applied';
+	created_at: string;
+	seen_at: string;
+	server_id: string;
+	server_name: string;
+	container_count: number;
+	changelog: ChangelogEntry[];
+}
+
 export const api = {
 	firstRunStatus: () => request<FirstRunStatus>('/api/v1/firstrun'),
 	firstRunCreate: (body: { username: string; password: string; email: string }) =>
@@ -141,7 +167,12 @@ export const api = {
 			server_name: string;
 			expires_at: string;
 			ca_fingerprint: string;
-		}>('/api/v1/admin/agents/enroll-token', { method: 'POST', body, auth: true })
+		}>('/api/v1/admin/agents/enroll-token', { method: 'POST', body, auth: true }),
+	listUpdates: () => request<{ updates: UpdateListItem[] }>('/api/v1/updates'),
+	listContainerChangelog: (containerId: string) =>
+		request<{ image_ref: string; entries: ChangelogEntry[] }>(
+			`/api/v1/containers/${encodeURIComponent(containerId)}/changelog`
+		)
 };
 
 export const urls = {

@@ -52,7 +52,7 @@ It does **not** cover:
 
 ### T5 — Session theft via XSS
 
-**Mitigation:** Strict CSP (`default-src 'self'`, no inline), `httpOnly` cookies, `Trusted Types` once supported broadly, output sanitization on user-provided changelog URLs (markdown rendered with `bluemonday`).
+**Mitigation:** Strict CSP (`default-src 'self'`; `style-src` and the SvelteKit fallback bootstrap are the only `'unsafe-inline'` sources, all other scripts from `self`), `httpOnly` cookies, `Trusted Types` once supported broadly, output sanitization on user-provided changelog URLs (markdown rendered with `bluemonday`).
 
 ### T6 — MITM on agent↔controller
 
@@ -89,6 +89,17 @@ It does **not** cover:
 ### T14 — Spoofed source IP via `X-Forwarded-For`
 
 **Mitigation:** The controller ignores `X-Forwarded-For` by default. The middleware only honours the header when the connection's remote address is in the operator-supplied `--trusted-proxies` list (CIDR or single IP). An attacker cannot spoof their source IP unless they are the trusted proxy itself, in which case the attack is on the proxy, not DockPulse.
+
+### T15 — Poisoned registry or release-feed data reaching agents
+
+A compromised or malicious registry (or an attacker who can push to a tag the agent polls) controls the manifest digest the agent compares against, and a forged or hijacked release feed controls changelog text/URLs. If any of this data were executed, stored unvalidated, or used to redirect the agent, it could cause arbitrary code execution or SSRF.
+
+**Mitigation:**
+- Registry responses are parsed leniently as plain data (digest strings, media types) and never executed; only the `repo:tag → digest` mapping is stored.
+- Changelog fetches are SSRF-bounded: the fetch host is hardcoded to `api.github.com` in code and is not operator-configurable, so a poisoned image label (`org.opencontainers.image.source`) cannot point the agent at an arbitrary internal address.
+- Changelog entries are deduplicated by `(image_id, version, hash)` and rendered as text; URLs are sanitized (`bluemonday`) before being emitted to the UI.
+- The digest comparison is advisory only (Phase 2); applying an update is a distinct, user-authorized action (Phase 6, see T11).
+- Agent→controller reports carry the same HMAC+nonce envelope as every other payload (T6/T7), so a poisoned agent cannot forge reports for other hosts.
 
 ## Residual risk
 

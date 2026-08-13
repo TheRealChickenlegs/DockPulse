@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Mode identifies which role this DockPulse process is running.
@@ -55,6 +56,7 @@ type Agent struct {
 	DataDir                 string // directory for certs, registry creds, state
 	EnrollTokenFile         string // path to a file containing the one-time enrollment token
 	ControllerCAFile        string // path to the controller CA certificate (for pinning)
+	RegistryPollInterval    time.Duration // how often to poll registries for image updates
 }
 
 // Config is the resolved configuration for the running process.
@@ -146,6 +148,7 @@ func Load(args []string) (any, error) {
 	dataDir := fs.String("data", "./data", "Directory for agent state (agent mode)")
 	tokenFile := fs.String("enroll-token-file", "", "Path to a file containing the one-time enrollment token (agent mode)")
 	controllerCA := fs.String("controller-ca", "", "Path to the controller CA cert for fingerprint pinning (agent mode)")
+	registryPoll := fs.Duration("registry-poll", time.Hour, "How often to poll registries for image updates (agent mode). Use a small value like 30s to test.")
 
 	showVersion := fs.Bool("version", false, "Print version and exit")
 
@@ -198,6 +201,7 @@ func Load(args []string) (any, error) {
 			DataDir:                 *dataDir,
 			EnrollTokenFile:         *tokenFile,
 			ControllerCAFile:        *controllerCA,
+			RegistryPollInterval:    *registryPoll,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown mode %q (expected controller or agent)", *modeStr)

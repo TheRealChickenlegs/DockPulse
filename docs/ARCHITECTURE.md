@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: Phase 0 skeleton. The diagrams and contracts below are the target design; only `/healthz`, mode dispatch, logging, config, and the embedded SvelteKit shell are implemented in this phase.
+> Status: Phases 0–1 complete; Phase 2 (update detection + changelog) in progress. Implemented: mode dispatch, logging, config, embedded SvelteKit SPA, session auth (Argon2id), CSRF, enrollment + mTLS, container inventory, and — for the Docker Hub registry — digest polling, OCI-label/GitHub-release changelog fetch, and the corresponding agent + frontend API endpoints.
 
 ## Topology
 
@@ -101,11 +101,11 @@ audit_log
 
 ### Frontend API (`/api/v1/...`, session cookie + CSRF)
 
-Implemented in `go/internal/controller/frontend_api`. Endpoints are documented per package; an OpenAPI doc is generated in Phase 1.
+Implemented in `go/internal/controller/agentapi/frontend_updates.go` and `go/internal/controller/agentapi/admin_handlers.go`; routes are wired in `go/internal/controller/server.go`. Endpoints are documented in `docs/API.md`; an OpenAPI doc is generated in a later phase.
 
 ### Agent API (`/agent/v1/...`, mTLS + signed payload)
 
-Implemented in `go/internal/controller/agent_api`. Every request carries:
+Implemented in `go/internal/controller/agentapi`. Every request carries:
 
 ```
 X-DockPulse-Signature: t=<unix>,v1=<hex(hmac-sha256(body || t || nonce))>

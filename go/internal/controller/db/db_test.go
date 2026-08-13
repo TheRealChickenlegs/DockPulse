@@ -101,8 +101,14 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 migration row, got %d", count)
+	// Expect one row per migration file. The count is derived from
+	// the migration set so adding migrations doesn't rot this test.
+	ms, err := loadMigrationFiles(migrationsFS)
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	if count != len(ms) {
+		t.Fatalf("expected %d migration rows, got %d", len(ms), count)
 	}
 }
 

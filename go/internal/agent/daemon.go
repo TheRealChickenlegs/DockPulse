@@ -2,16 +2,18 @@
 // each Docker host, enrolls with the controller over mTLS, then
 // periodically reports container state and host metadata.
 //
-// Phase 1 responsibilities:
+// Responsibilities:
 //
 //   - On first start, load or create the local agent key + cert.
 //   - Enroll against the controller using a one-time token.
 //   - Periodically ping Docker, sign and POST heartbeats, and
 //     sign and POST container snapshots.
+//   - Poll registries for the running images' remote digests and
+//     report digest deltas (Phase 2).
+//   - Fetch changelog entries from the images' OCI-label sources
+//     and upload them (Phase 2).
 //
-// Phase 1d is intentionally narrow — registry polling, changelog
-// fetching, and the apply-update channel all land in later
-// phases.
+// The apply-update command channel lands in a later phase.
 package agent
 
 import (
@@ -41,7 +43,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/changelog"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/docker"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/registry"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
 )
 
@@ -77,6 +81,16 @@ type Daemon struct {
 	serverID   string
 	serverName string
 	enrolled   bool
+
+	// changelogFetcher fetches release notes from the sources the
+	// images' OCI labels point at.
+	changelogFetcher *changelog.Fetcher
+
+	// lastReported tracks the last remote digest reported to the
+	// controller per repo:tag so an unchanged registry isn't
+	// re-reported (and its changelog re-fetched) on every poll.
+	muReported   sync.Mutex
+	lastReported map[string]string
 }
 
 // Run starts the agent and blocks until ctx is cancelled. It
@@ -98,10 +112,12 @@ func Run(ctx context.Context, cfg config.Agent) error {
 	}
 
 	d := &Daemon{
-		Cfg:     cfg,
-		Log:     logger,
-		Docker:  dockerClient,
-		baseURL: strings.TrimRight(cfg.ControllerURL, "/"),
+		Cfg:              cfg,
+		Log:              logger,
+		Docker:           dockerClient,
+		baseURL:          strings.TrimRight(cfg.ControllerURL, "/"),
+		changelogFetcher: changelog.NewFetcher(),
+		lastReported:     map[string]string{},
 	}
 	// Pre-enrollment client: no client cert yet, and /agent/v1/enroll
 	// is the one endpoint the controller accepts without mTLS.
@@ -119,9 +135,17 @@ func (d *Daemon) loop(ctx context.Context) error {
 	defer heartbeat.Stop()
 	defer snapshot.Stop()
 
+	var registryPollC <-chan time.Time
+	if d.Cfg.RegistryPollInterval > 0 {
+		registryPoll := time.NewTicker(d.Cfg.RegistryPollInterval)
+		defer registryPoll.Stop()
+		registryPollC = registryPoll.C
+	}
+
 	// Send one heartbeat and snapshot immediately so the UI is
 	// populated without waiting for the first tick.
 	d.tick(ctx)
+	d.pollRegistry(ctx)
 
 	for {
 		select {
@@ -135,6 +159,10 @@ func (d *Daemon) loop(ctx context.Context) error {
 		case <-snapshot.C:
 			if err := d.snapshot(ctx); err != nil {
 				d.Log.Warn("snapshot", "err", err)
+			}
+		case <-registryPollC:
+			if err := d.pollRegistry(ctx); err != nil {
+				d.Log.Warn("registry poll", "err", err)
 			}
 		}
 	}
@@ -172,10 +200,14 @@ func (d *Daemon) snapshot(ctx context.Context) error {
 	}
 	out := make([]snapshotContainer, 0, len(containers))
 	for _, c := range containers {
+		imageRef := c.Image
+		if ref, perr := registry.Parse(c.Image); perr == nil {
+			imageRef = ref.String()
+		}
 		out = append(out, snapshotContainer{
 			DockerID:    c.ID,
 			Name:        docker.StripNamePrefix(c.Name),
-			ImageRef:    c.Image,
+			ImageRef:    imageRef,
 			ImageDigest: c.ImageID,
 			State:       c.State,
 			Labels:      c.Labels,
@@ -238,6 +270,169 @@ func (d *Daemon) sendSnapshot(ctx context.Context, containers []snapshotContaine
 	if res.StatusCode/100 != 2 {
 		respBody, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("snapshot status %d: %s", res.StatusCode, respBody)
+	}
+	return nil
+}
+
+// reportUpdate is one digest delta sent to POST /agent/v1/updates/report.
+type reportUpdate struct {
+	ImageRef   string `json:"image_ref"`
+	Repo       string `json:"repo"`
+	Tag        string `json:"tag"`
+	FromDigest string `json:"from_digest"`
+	ToDigest   string `json:"to_digest"`
+}
+
+// pollRegistry resolves the remote digest for every unique running
+// image and reports any that have moved ahead of the local digest.
+// Images on unsupported registries and digest-pinned images are
+// skipped. A remote digest already reported for a ref is not
+// re-reported, so an unchanged registry stays quiet between polls.
+func (d *Daemon) pollRegistry(ctx context.Context) error {
+	containers, err := d.Docker.ListContainers(ctx)
+	if err != nil {
+		return err
+	}
+
+	type target struct {
+		ref         registry.Ref
+		imageRef    string
+		localDigest string
+		imageID     string
+	}
+	seen := map[string]target{}
+	for _, c := range containers {
+		if c.State != "running" {
+			continue
+		}
+		ref, err := registry.Parse(c.Image)
+		if err != nil || ref.Digest != "" {
+			continue
+		}
+		key := ref.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = target{ref: ref, imageRef: c.Image, localDigest: c.ImageID, imageID: c.ImageID}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+
+	type changelogUpload struct {
+		imageRef string
+		entries  []changelog.Entry
+	}
+	var updates []reportUpdate
+	var uploads []changelogUpload
+
+	for _, t := range seen {
+		provider, err := registry.New(t.imageRef)
+		if err != nil {
+			continue
+		}
+		remote, err := provider.ResolveDigest(ctx, t.ref.Repo, t.ref.Tag)
+		if err != nil {
+			d.Log.Warn("registry resolve", "ref", t.imageRef, "err", err)
+			continue
+		}
+		if remote == "" || remote == t.localDigest {
+			continue
+		}
+		d.muReported.Lock()
+		last, reported := d.lastReported[t.ref.String()]
+		if reported && last == remote {
+			d.muReported.Unlock()
+			continue
+		}
+		d.lastReported[t.ref.String()] = remote
+		d.muReported.Unlock()
+
+		updates = append(updates, reportUpdate{
+			ImageRef:   t.ref.String(),
+			Repo:       t.ref.Repo,
+			Tag:        t.ref.Tag,
+			FromDigest: t.localDigest,
+			ToDigest:   remote,
+		})
+		if entries := d.fetchChangelog(ctx, t.imageID, t.imageRef); len(entries) > 0 {
+			uploads = append(uploads, changelogUpload{imageRef: t.ref.String(), entries: entries})
+		}
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+	if err := d.sendUpdatesReport(ctx, updates); err != nil {
+		return err
+	}
+	for _, u := range uploads {
+		if err := d.sendChangelogUpload(ctx, u.imageRef, u.entries); err != nil {
+			d.Log.Warn("changelog upload", "ref", u.imageRef, "err", err)
+		}
+	}
+	return nil
+}
+
+// fetchChangelog inspects the local image's OCI labels for changelog
+// source hints and fetches release notes from those sources. It
+// returns nil when the image exposes no supported source.
+func (d *Daemon) fetchChangelog(ctx context.Context, imageID, imageRef string) []changelog.Entry {
+	img, err := d.Docker.ImageInspect(ctx, imageID)
+	if err != nil {
+		d.Log.Warn("image inspect", "image", imageID, "err", err)
+		return nil
+	}
+	sources := changelog.SourcesFromLabels(img.Config.Labels)
+	if len(sources) == 0 {
+		return nil
+	}
+	entries, err := d.changelogFetcher.FetchSources(ctx, sources)
+	if err != nil {
+		d.Log.Warn("changelog fetch", "image", imageRef, "err", err)
+		return nil
+	}
+	return entries
+}
+
+func (d *Daemon) sendUpdatesReport(ctx context.Context, updates []reportUpdate) error {
+	body, err := json.Marshal(map[string]any{"updates": updates})
+	if err != nil {
+		return err
+	}
+	req, err := d.newSignedRequest(ctx, http.MethodPost, "/agent/v1/updates/report", body)
+	if err != nil {
+		return err
+	}
+	res, err := d.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _, _ = io.Copy(io.Discard, res.Body); _ = res.Body.Close() }()
+	if res.StatusCode/100 != 2 {
+		respBody, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("updates report status %d: %s", res.StatusCode, respBody)
+	}
+	return nil
+}
+
+func (d *Daemon) sendChangelogUpload(ctx context.Context, imageRef string, entries []changelog.Entry) error {
+	body, err := json.Marshal(map[string]any{"image_ref": imageRef, "entries": entries})
+	if err != nil {
+		return err
+	}
+	req, err := d.newSignedRequest(ctx, http.MethodPost, "/agent/v1/changelog/upload", body)
+	if err != nil {
+		return err
+	}
+	res, err := d.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _, _ = io.Copy(io.Discard, res.Body); _ = res.Body.Close() }()
+	if res.StatusCode/100 != 2 {
+		respBody, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("changelog upload status %d: %s", res.StatusCode, respBody)
 	}
 	return nil
 }

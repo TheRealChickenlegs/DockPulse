@@ -382,6 +382,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	// All other endpoints require a valid client cert.
 	mux.Handle("/agent/v1/heartbeat", s.requireAgent(http.HandlerFunc(s.HandleHeartbeat)))
 	mux.Handle("/agent/v1/containers/snapshot", s.requireAgent(http.HandlerFunc(s.HandleContainerSnapshot)))
+	mux.Handle("/agent/v1/updates/report", s.requireAgent(http.HandlerFunc(s.HandleUpdatesReport)))
+	mux.Handle("/agent/v1/changelog/upload", s.requireAgent(http.HandlerFunc(s.HandleChangelogUpload)))
 }
 
 // requireAgent is the mTLS middleware. It runs only on HTTPS in

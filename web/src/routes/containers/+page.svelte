@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { api, type ServerListItem, type ContainerListItem } from '$lib/api';
+	import { api, type ServerListItem, type ContainerListItem, type ChangelogEntry } from '$lib/api';
 
 	let servers: ServerListItem[] = $state([]);
 	let selectedId: string = $state('');
@@ -10,6 +10,9 @@
 	let loadingContainers = $state(false);
 	let error: string | null = $state(null);
 	let selected: ContainerListItem | null = $state(null);
+	let changelog: ChangelogEntry[] = $state([]);
+	let loadingChangelog = $state(false);
+	let changelogError: string | null = $state(null);
 
 	async function loadServers() {
 		loadingServers = true;
@@ -47,9 +50,24 @@
 
 	function open(c: ContainerListItem) {
 		selected = c;
+		changelog = [];
+		changelogError = null;
+		loadingChangelog = true;
+		api
+			.listContainerChangelog(c.id)
+			.then((res) => {
+				changelog = res.entries;
+			})
+			.catch((err) => {
+				changelogError = err instanceof Error ? err.message : 'Failed to load changelog';
+			})
+			.finally(() => {
+				loadingChangelog = false;
+			});
 	}
 	function close() {
 		selected = null;
+		changelog = [];
 	}
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape') close();
@@ -170,7 +188,26 @@
 			<dt>Updated</dt>
 			<dd>{new Date(selected.updated_at).toLocaleString()}</dd>
 		</dl>
-		<p class="muted">Changelog and apply-update actions land in Phase 2+.</p>
+		<h3 class="changelog-title">Changelog</h3>
+		{#if loadingChangelog}
+			<p class="muted">Loading…</p>
+		{:else if changelogError}
+			<p class="muted changelog-error">{changelogError}</p>
+		{:else if changelog.length === 0}
+			<p class="muted">No changelog entries for this image yet.</p>
+		{:else}
+			<ul class="changelog">
+				{#each changelog as e (e.version + e.url)}
+					<li>
+						<span class="version">{e.title ?? e.version}</span>
+						<span class="muted">{e.published_at ? new Date(e.published_at).toLocaleDateString() : ''}</span>
+						{#if e.url}
+							<a href={e.url} rel="external noopener noreferrer" target="_blank" class="link">release →</a>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</div>
 {/if}
 
@@ -369,6 +406,41 @@
 		font-family: var(--font-mono);
 		font-size: 0.83rem;
 		word-break: break-all;
+	}
+	.changelog-title {
+		margin: 0 0 0.5rem;
+		font-size: 0.9rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--fg-1);
+	}
+	.changelog {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.45rem;
+		font-size: 0.88rem;
+	}
+	.changelog li {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+	}
+	.changelog .version {
+		font-weight: 600;
+	}
+	.link {
+		margin-left: auto;
+		color: var(--fg-1);
+		text-decoration: none;
+		font-size: 0.78rem;
+	}
+	.link:hover {
+		color: var(--fg-0);
+	}
+	.changelog-error {
+		color: var(--danger);
 	}
 	@keyframes fade {
 		from {

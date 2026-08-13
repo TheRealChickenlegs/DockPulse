@@ -1,8 +1,8 @@
-# DockPulse — Public API surface (Phase 0 placeholder)
+# DockPulse — Public API surface
 
 > This document tracks the **public, documented** HTTP surface of the DockPulse controller. Internal handlers, in-process channels, and Go-package APIs are not listed here. Anything in this file is a compatibility commitment: changes must be additive unless the version is bumped.
 
-This file is hand-maintained until Phase 1, at which point it will be generated from the Go source via an OpenAPI generator.
+This file is hand-maintained until an OpenAPI generator is introduced.
 
 ## Controller
 
@@ -15,25 +15,26 @@ Base URL: `https://<your-host>`
 | GET | `/` | none | SPA shell. Returns the embedded SvelteKit `index.html`. |
 | GET | `/*` | none | SPA route fallback. |
 | GET | `/static/*`, `/_app/*`, `/favicon.svg`, `/robots.txt` | none | Static assets from the embedded bundle. |
+| POST | `/api/v1/login` | none | Session login with username + password. Sets `dockpulse_session` and `dockpulse_csrf` cookies. |
+| POST | `/api/v1/logout` | session | Invalidates the session. |
+| GET | `/api/v1/me` | session | Returns the current user and session state. |
+| GET | `/api/v1/servers` | session | Lists enrolled servers with heartbeat/agent info. |
+| GET | `/api/v1/servers/:id/containers` | session | Container inventory for one server. |
+| GET | `/api/v1/containers/:id` | session | Single container detail. |
+| GET | `/api/v1/containers/:id/changelog` | session | Changelog entries for the container's image. Returns `{"image_ref","entries"}`. |
+| GET | `/api/v1/updates` | session | Detected updates with per-image changelog and affected-container counts. |
+| POST | `/api/v1/admin/agents/enroll-token` | session (admin) | Creates a short-lived enrollment token. |
+| POST | `/agent/v1/enroll` | token + mTLS | One-time enrollment; exchanges the token for a client cert. |
+| POST | `/agent/v1/heartbeat` | mTLS + signed | Agent liveness + Docker info. |
+| POST | `/agent/v1/containers/snapshot` | mTLS + signed | Container state batch. |
+| POST | `/agent/v1/updates/report` | mTLS + signed | Detected `(image, local digest, remote digest)` deltas. |
+| POST | `/agent/v1/changelog/upload` | mTLS + signed | Changelog entries for images with a digest delta. |
 
 The following endpoints are planned but **not yet implemented**:
 
 | Method | Path | Planned for |
 | --- | --- | --- |
-| POST | `/api/v1/login` | Phase 1 |
-| POST | `/api/v1/logout` | Phase 1 |
-| GET | `/api/v1/me` | Phase 1 |
-| GET | `/api/v1/servers` | Phase 1 |
-| GET | `/api/v1/servers/:id/containers` | Phase 1 |
-| GET | `/api/v1/containers/:id` | Phase 1 |
-| GET | `/api/v1/containers/:id/changelog` | Phase 2 |
-| GET | `/api/v1/updates` | Phase 2 |
 | POST | `/api/v1/updates/:id/{ignore,apply,unignore}` | Phase 6 (opt-in apply) |
-| POST | `/agent/v1/enroll` | Phase 1 |
-| POST | `/agent/v1/heartbeat` | Phase 1 |
-| POST | `/agent/v1/containers/snapshot` | Phase 1 |
-| POST | `/agent/v1/updates/report` | Phase 2 |
-| POST | `/agent/v1/changelog/upload` | Phase 2 |
 
 ## Headers
 

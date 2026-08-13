@@ -151,6 +151,8 @@ func (s *Server) buildRouter() http.Handler {
 		r.Get("/api/v1/me", auth.HandleMe(s.dbCtx(), s.db))
 		r.Get("/api/v1/servers", agentapi.HandleListServers(s.dbCtx(), s.db))
 		r.Get("/api/v1/servers/{id}/containers", agentapi.HandleListContainers(s.dbCtx(), s.db))
+		r.Get("/api/v1/updates", agentapi.HandleListUpdates(s.dbCtx(), s.db))
+		r.Get("/api/v1/containers/{id}/changelog", agentapi.HandleContainerChangelog(s.dbCtx(), s.db))
 		r.Post("/api/v1/admin/agents/enroll-token", agentapi.HandleCreateEnrollmentToken(s.dbCtx(), s.db, s.ca.Fingerprint()))
 	})
 
