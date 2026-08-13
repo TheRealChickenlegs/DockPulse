@@ -10,8 +10,16 @@
 #   3. Update AGENT_NAME and CONTROLLER_URL below.
 #   4. docker compose -f deploy/docker-compose.agent.yml up -d
 #
-# In Phase 0 the agent will validate configuration and idle; the
-# enrollment handshake ships in Phase 1.
+# Optional: raise Docker Hub's pull rate limit with a personal access
+# token. Create one at https://hub.docker.com/settings/security (read-only
+# scope is enough), then:
+#        printf '<USERNAME>:<PAT>' > ./agent-data/registry.cred
+#        chmod 600 ./agent-data/registry.cred
+#        # uncomment --registry-token-file below (and the REGISTRY_CRED_FILE
+#        # env default if you prefer to set it in .env)
+#
+# Registry polling runs every REGISTRY_POLL (default 24h). Use the
+# dashboard's "Scan now" button to force an immediate poll.
 
 name: dockpulse-agent
 
@@ -46,6 +54,8 @@ services:
       - "--docker=tcp://socket-proxy:2375"
       - "--data=/data"
       - "--enroll-token-file=/data/enroll.token"
+      - "--registry-poll=${REGISTRY_POLL:-24h}"
+      - "--registry-token-file=${REGISTRY_CRED_FILE:-}"
     environment:
       DOCKPULSE_LOG_LEVEL: ${DOCKPULSE_LOG_LEVEL:-info}
       DOCKPULSE_LOG_FORMAT: json

@@ -2,9 +2,9 @@
 // so the agent can detect when a running image has been updated.
 //
 // Providers are pluggable and chosen by the registry host in the
-// image reference. Phase 2 ships the Docker Hub provider (anonymous
-// bearer-token auth); other registries (ghcr, quay, gcr, ecr,
-// gitlab) land in later phases.
+// image reference. Phase 2 ships the Docker Hub provider (bearer-token
+// auth, anonymous or via an optional personal access token); other
+// registries (ghcr, quay, gcr, ecr, gitlab) land in later phases.
 package registry
 
 import (
@@ -27,11 +27,14 @@ type Provider interface {
 	ResolveDigest(ctx context.Context, repo, tag string) (string, error)
 }
 
+// Option configures a provider created by New.
+type Option func(Provider)
+
 // New returns the provider for the given fully-qualified image
 // reference, or ErrUnsupported when no provider is implemented for
 // its registry host. A digest-pinned reference (no tag) is not
 // pollable and returns ErrUnsupported.
-func New(ref string) (Provider, error) {
+func New(ref string, opts ...Option) (Provider, error) {
 	r, err := Parse(ref)
 	if err != nil {
 		return nil, err
@@ -41,7 +44,11 @@ func New(ref string) (Provider, error) {
 	}
 	switch r.Registry {
 	case "", "docker.io", "index.docker.io", "registry-1.docker.io":
-		return NewHub(), nil
+		p := NewHub()
+		for _, o := range opts {
+			o(p)
+		}
+		return p, nil
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupported, r.Registry)
 	}

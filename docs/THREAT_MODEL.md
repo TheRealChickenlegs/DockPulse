@@ -101,6 +101,16 @@ A compromised or malicious registry (or an attacker who can push to a tag the ag
 - The digest comparison is advisory only (Phase 2); applying an update is a distinct, user-authorized action (Phase 6, see T11).
 - Agent→controller reports carry the same HMAC+nonce envelope as every other payload (T6/T7), so a poisoned agent cannot forge reports for other hosts.
 
+### T16 — Registry credential (PAT) disclosure from the agent host
+
+A Docker Hub personal access token stored on an agent host (`--registry-token-file`, one line `username:token`) can be read by anything that can read the agent's data directory, and if exfiltrated it grants the holder the account's Docker Hub pull (and, if scoped higher, push) access.
+
+**Mitigation:**
+- The file is only referenced by path; the token is never logged, echoed in config output, or transmitted to the controller. The credential is held in memory for the agent's lifetime and used solely for the Docker Hub token exchange (REGISTRIES.md).
+- The file must be created with mode `0600` (the bundled compose's `agent-data` directory is bound into the container); the credential only leaves the agent host as Basic auth over TLS to `auth.docker.io`.
+- Operators should use a read-only-scoped PAT dedicated to DockPulse so a disclosure cannot push images.
+- The credential is never sent to non-Hub registries; the `hub` provider is the only consumer (T15 remains in force for all other registry traffic).
+
 ## Residual risk
 
 - **T2 (credential stuffing using breached passwords)** — partially mitigated by Argon2id. Mitigation if externally exposed: require OIDC and disable local login.

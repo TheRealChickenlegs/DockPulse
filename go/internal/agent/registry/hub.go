@@ -20,14 +20,20 @@ const (
 
 // hub is the Docker Hub v2 registry provider. Docker Hub requires a
 // bearer token scoped to the repository before the manifest API
-// answers; the token exchange is anonymous for public images, which
-// covers the Phase 2 use case.
+// answers. The token exchange is anonymous for public images by
+// default; when credentials are set (a personal access token via
+// --registry-token-file) the exchange is made as that account, which
+// lifts the unauthenticated pull rate limit.
 type hub struct {
 	client *http.Client
 	// tokenURL, registryURL, and service are injectable for tests.
 	tokenURL    string
 	registryURL string
 	service     string
+	// username and password authenticate the token exchange. When both
+	// are empty the exchange is anonymous.
+	username string
+	password string
 }
 
 // NewHub constructs the Docker Hub provider.
@@ -92,6 +98,9 @@ func (h *hub) token(ctx context.Context, repo string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return "", err
+	}
+	if h.username != "" {
+		req.SetBasicAuth(h.username, h.password)
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {

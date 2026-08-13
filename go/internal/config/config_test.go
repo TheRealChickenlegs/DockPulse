@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestLoadControllerDefaults(t *testing.T) {
@@ -68,6 +69,35 @@ func TestLoadUnknownMode(t *testing.T) {
 	_, err := Load([]string{"--mode=bogus"})
 	if err == nil {
 		t.Fatal("expected error for unknown mode")
+	}
+}
+
+func TestLoadAgentRegistryFlags(t *testing.T) {
+	cfg, err := Load([]string{"--mode=agent", "--controller=https://example.com", "--name=foo", "--data=/tmp/dockpulse"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a, ok := cfg.(Agent)
+	if !ok {
+		t.Fatalf("config is %T, want config.Agent", cfg)
+	}
+	if a.RegistryPollInterval != 24*time.Hour {
+		t.Errorf("default RegistryPollInterval = %s, want 24h", a.RegistryPollInterval)
+	}
+	if a.RegistryTokenFile != "" {
+		t.Errorf("default RegistryTokenFile = %q, want empty", a.RegistryTokenFile)
+	}
+
+	cfg2, err := Load([]string{"--mode=agent", "--controller=https://example.com", "--name=foo", "--data=/tmp/dockpulse", "--registry-poll=6h", "--registry-token-file=/run/secrets/registry.cred"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a2 := cfg2.(Agent)
+	if a2.RegistryPollInterval != 6*time.Hour {
+		t.Errorf("RegistryPollInterval = %s, want 6h", a2.RegistryPollInterval)
+	}
+	if a2.RegistryTokenFile != "/run/secrets/registry.cred" {
+		t.Errorf("RegistryTokenFile = %q, want /run/secrets/registry.cred", a2.RegistryTokenFile)
 	}
 }
 

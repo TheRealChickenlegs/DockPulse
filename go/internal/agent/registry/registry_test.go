@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,71 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewWithCredential(t *testing.T) {
+	cred := &Credential{Username: "chicken", Token: "pat-secret"}
+	p, err := New("nginx", WithCredential(cred))
+	if err != nil {
+		t.Fatalf("New(nginx, WithCredential): %v", err)
+	}
+	h, ok := p.(*hub)
+	if !ok {
+		t.Fatalf("provider is %T, want *hub", p)
+	}
+	if h.username != "chicken" || h.password != "pat-secret" {
+		t.Errorf("hub credential = %q:%q, want chicken:pat-secret", h.username, h.password)
+	}
+	if _, err := New("ghcr.io/user/app", WithCredential(cred)); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("New(ghcr, WithCredential) = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestNewWithNilCredential(t *testing.T) {
+	if _, err := New("nginx", WithCredential(nil)); err != nil {
+		t.Fatalf("New(nginx, WithCredential(nil)): %v", err)
+	}
+}
+
+func TestLoadCredentialFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/cred"
+	if err := os.WriteFile(path, []byte("chicken:pat-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadCredentialFile(path)
+	if err != nil {
+		t.Fatalf("LoadCredentialFile: %v", err)
+	}
+	if c.Username != "chicken" || c.Token != "pat-secret" {
+		t.Errorf("credential = %+v, want chicken:pat-secret", c)
+	}
+}
+
+func TestLoadCredentialFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := LoadCredentialFile(dir + "/does-not-exist"); err == nil {
+		t.Fatal("LoadCredentialFile(missing): expected error")
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"no colon", "justatoken\n"},
+		{"empty username", ":token\n"},
+		{"empty token", "user:\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := dir + "/" + c.name
+			if err := os.WriteFile(p, []byte(c.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadCredentialFile(p); err == nil {
+				t.Fatalf("LoadCredentialFile(%s): expected error", p)
+			}
+		})
+	}
+}
+
 func TestHubResolveDigest(t *testing.T) {
 	var tokenSeen bool
 	var repoForToken string
@@ -109,6 +175,76 @@ func TestHubResolveDigest(t *testing.T) {
 	}
 	if !strings.Contains(repoForToken, "library/nginx") {
 		t.Errorf("token scope = %q, want it to contain library/nginx", repoForToken)
+	}
+}
+
+func TestHubResolveDigestWithCredential(t *testing.T) {
+	var sawBasicAuth bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			user, pass, ok := r.BasicAuth()
+			if !ok || user != "chicken" || pass != "pat-secret" {
+				http.Error(w, "expected Basic auth chicken:pat-secret", http.StatusUnauthorized)
+				return
+			}
+			sawBasicAuth = true
+			_ = json.NewEncoder(w).Encode(hubTokenResponse{Token: "authed-token"})
+			return
+		}
+		if r.URL.Path == "/v2/library/nginx/manifests/latest" {
+			if r.Header.Get("Authorization") != "Bearer authed-token" {
+				t.Errorf("manifest Authorization = %q, want Bearer authed-token", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Docker-Content-Digest", "sha256:remotedigest")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	h := &hub{
+		client:      srv.Client(),
+		tokenURL:    srv.URL + "/token",
+		registryURL: srv.URL,
+		service:     "registry.docker.io",
+		username:    "chicken",
+		password:    "pat-secret",
+	}
+
+	got, err := h.ResolveDigest(context.Background(), "library/nginx", "latest")
+	if err != nil {
+		t.Fatalf("ResolveDigest: %v", err)
+	}
+	if got != "sha256:remotedigest" {
+		t.Errorf("digest = %q, want sha256:remotedigest", got)
+	}
+	if !sawBasicAuth {
+		t.Fatal("token exchange did not authenticate")
+	}
+}
+
+func TestHubAnonymousTokenHasNoBasicAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			if r.Header.Get("Authorization") != "" {
+				t.Errorf("anonymous token exchange set Authorization %q", r.Header.Get("Authorization"))
+			}
+			_ = json.NewEncoder(w).Encode(hubTokenResponse{Token: "tok"})
+			return
+		}
+		if r.URL.Path == "/v2/library/nginx/manifests/latest" {
+			w.Header().Set("Docker-Content-Digest", "sha256:remotedigest")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	h := &hub{client: srv.Client(), tokenURL: srv.URL + "/token", registryURL: srv.URL, service: "registry.docker.io"}
+	if _, err := h.ResolveDigest(context.Background(), "library/nginx", "latest"); err != nil {
+		t.Fatalf("ResolveDigest: %v", err)
 	}
 }
 

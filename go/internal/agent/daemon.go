@@ -91,6 +91,11 @@ type Daemon struct {
 	// re-reported (and its changelog re-fetched) on every poll.
 	muReported   sync.Mutex
 	lastReported map[string]string
+
+	// registryCred is the optional credential (Docker Hub PAT) used
+	// to authenticate registry pulls. Loaded once at startup from
+	// --registry-token-file.
+	registryCred *registry.Credential
 }
 
 // Run starts the agent and blocks until ctx is cancelled. It
@@ -111,6 +116,15 @@ func Run(ctx context.Context, cfg config.Agent) error {
 		return fmt.Errorf("docker client: %w", err)
 	}
 
+	var registryCred *registry.Credential
+	if cfg.RegistryTokenFile != "" {
+		registryCred, err = registry.LoadCredentialFile(cfg.RegistryTokenFile)
+		if err != nil {
+			return fmt.Errorf("load registry credential: %w", err)
+		}
+		logger.Info("registry authentication enabled", "provider", "hub")
+	}
+
 	d := &Daemon{
 		Cfg:              cfg,
 		Log:              logger,
@@ -118,6 +132,7 @@ func Run(ctx context.Context, cfg config.Agent) error {
 		baseURL:          strings.TrimRight(cfg.ControllerURL, "/"),
 		changelogFetcher: changelog.NewFetcher(),
 		lastReported:     map[string]string{},
+		registryCred:     registryCred,
 	}
 	// Pre-enrollment client: no client cert yet, and /agent/v1/enroll
 	// is the one endpoint the controller accepts without mTLS.
@@ -382,7 +397,7 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 	var uploads []changelogUpload
 
 	for _, t := range seen {
-		provider, err := registry.New(t.imageRef)
+		provider, err := registry.New(t.imageRef, registry.WithCredential(d.registryCred))
 		if err != nil {
 			continue
 		}

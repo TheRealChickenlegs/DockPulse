@@ -57,6 +57,7 @@ type Agent struct {
 	EnrollTokenFile         string // path to a file containing the one-time enrollment token
 	ControllerCAFile        string // path to the controller CA certificate (for pinning)
 	RegistryPollInterval    time.Duration // how often to poll registries for image updates
+	RegistryTokenFile       string // path to a file containing "username:token" for authenticated registry pulls
 }
 
 // Config is the resolved configuration for the running process.
@@ -80,7 +81,7 @@ func (c Controller) String() string {
 
 // String implements fmt.Stringer for log output without leaking secrets.
 func (a Agent) String() string {
-	return fmt.Sprintf("%s name=%s controller=%s docker=%s data=%s", a.Common, a.Name, redactURL(a.ControllerURL), a.DockerHost, a.DataDir)
+	return fmt.Sprintf("%s name=%s controller=%s docker=%s data=%s registry_poll=%s", a.Common, a.Name, redactURL(a.ControllerURL), a.DockerHost, a.DataDir, a.RegistryPollInterval)
 }
 
 func redactURL(raw string) string {
@@ -148,7 +149,13 @@ func Load(args []string) (any, error) {
 	dataDir := fs.String("data", "./data", "Directory for agent state (agent mode)")
 	tokenFile := fs.String("enroll-token-file", "", "Path to a file containing the one-time enrollment token (agent mode)")
 	controllerCA := fs.String("controller-ca", "", "Path to the controller CA cert for fingerprint pinning (agent mode)")
-	registryPoll := fs.Duration("registry-poll", time.Hour, "How often to poll registries for image updates (agent mode). Use a small value like 30s to test.")
+	// Registry polling defaults to 24h so an unauthenticated
+	// deployment stays far under Docker Hub's rate limit; the
+	// on-demand scan command (POST /api/v1/servers/{id}/refresh)
+	// polls the registry immediately when the operator wants an
+	// up-to-date check.
+	registryPoll := fs.Duration("registry-poll", 24*time.Hour, "How often to poll registries for image updates (agent mode). Set to 0 to disable. On-demand scans poll immediately.")
+	registryTokenFile := fs.String("registry-token-file", "", "Path to a file containing 'username:token' for authenticated registry pulls (agent mode). Currently used for Docker Hub to raise the unauthenticated rate limit. Secret - keep the file mode 0600.")
 
 	showVersion := fs.Bool("version", false, "Print version and exit")
 
@@ -202,6 +209,7 @@ func Load(args []string) (any, error) {
 			EnrollTokenFile:         *tokenFile,
 			ControllerCAFile:        *controllerCA,
 			RegistryPollInterval:    *registryPoll,
+			RegistryTokenFile:       *registryTokenFile,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown mode %q (expected controller or agent)", *modeStr)
