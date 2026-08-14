@@ -185,7 +185,7 @@ func TestContainerChangelog(t *testing.T) {
 		t.Fatalf("container changelog: %d %s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		ImageRef string            `json:"image_ref"`
+		ImageRef string           `json:"image_ref"`
 		Entries  []ChangelogEntry `json:"entries"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -196,6 +196,72 @@ func TestContainerChangelog(t *testing.T) {
 	}
 	if len(resp.Entries) != 1 {
 		t.Errorf("entries = %d, want 1", len(resp.Entries))
+	}
+}
+
+func TestContainerChangelogReportsUpdate(t *testing.T) {
+	s, d, ca := newTestServer(t)
+	admin := makeUser(t, d, "admin", "admin")
+	tok := makeToken(t, d, admin.ID, "server-a")
+	_, serverID := enroll(t, s, tok, "server-a", ca.Fingerprint())
+
+	containerID := auth.RandomToken(16)
+	if _, err := d.ExecContext(context.Background(), `
+		INSERT INTO containers(id, server_id, docker_id, name, image_ref, state, labels_json, ports_json, updated_at)
+		VALUES (?, ?, 'abc', 'web', 'user/app:1.27.0', 'running', '{}', '[]', '2026-01-01T00:00:00Z')
+	`, containerID, serverID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Release history: 1.28.0 (newer) > 1.27.0 (running) > 1.26.0.
+	uploadBody, _ := json.Marshal(ChangelogUploadRequest{
+		ImageRef: "user/app:1.27.0",
+		Entries: []ChangelogEntry{
+			{Version: "1.28.0", Source: "registry", PublishedAt: "2026-07-01T00:00:00Z"},
+			{Version: "1.27.0", Source: "registry", PublishedAt: "2026-06-01T00:00:00Z"},
+			{Version: "1.26.0", Source: "registry", PublishedAt: "2026-05-01T00:00:00Z"},
+		},
+	})
+	ur := withServerID(serverID)
+	ur.Body = io.NopCloser(bytes.NewReader(uploadBody))
+	s.HandleChangelogUpload(httptest.NewRecorder(), ur)
+
+	// A digest delta on the running tag marks an update as well.
+	reportBody, _ := json.Marshal(UpdatesReportRequest{Updates: []UpdateReport{
+		{ImageRef: "user/app:1.27.0", Repo: "user/app", Tag: "1.27.0", FromDigest: "sha256:local", ToDigest: "sha256:remote"},
+	}})
+	rr := withServerID(serverID)
+	rr.Body = io.NopCloser(bytes.NewReader(reportBody))
+	s.HandleUpdatesReport(httptest.NewRecorder(), rr)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/"+containerID+"/changelog", nil)
+	req.SetPathValue("id", containerID)
+	w := httptest.NewRecorder()
+	HandleContainerChangelog(context.Background(), d)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("container changelog: %d %s", w.Code, w.Body.String())
+	}
+	var resp ContainerChangelogResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.CurrentVersion != "1.27.0" {
+		t.Errorf("current_version = %q, want 1.27.0", resp.CurrentVersion)
+	}
+	if len(resp.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(resp.Entries))
+	}
+	if resp.Update == nil || !resp.Update.Available {
+		t.Fatal("update not reported as available")
+	}
+	if resp.Update.NewVersion != "1.28.0" {
+		t.Errorf("update.new_version = %q, want 1.28.0", resp.Update.NewVersion)
+	}
+	if len(resp.Update.Changelog) != 1 || resp.Update.Changelog[0].Version != "1.28.0" {
+		t.Errorf("update.changelog = %+v, want [1.28.0]", resp.Update.Changelog)
+	}
+	if resp.Update.ToDigest != "sha256:remote" {
+		t.Errorf("update.to_digest = %q, want sha256:remote", resp.Update.ToDigest)
 	}
 }
 

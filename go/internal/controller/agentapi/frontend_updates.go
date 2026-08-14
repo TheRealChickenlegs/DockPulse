@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"strings"
 )
 
 // UpdateListItem is the JSON shape of GET /api/v1/updates.
@@ -88,8 +89,30 @@ func HandleListUpdates(ctx context.Context, db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// HandleContainerChangelog returns the changelog entries for the
-// image the container is running.
+// ContainerChangelogUpdate describes an available update for the
+// container's image: either a digest delta reported by the agent (the
+// same tag moved) or a newer version present in the release history.
+type ContainerChangelogUpdate struct {
+	Available  bool             `json:"available"`
+	FromDigest string           `json:"from_digest,omitempty"`
+	ToDigest   string           `json:"to_digest,omitempty"`
+	Status     string           `json:"status,omitempty"`
+	NewVersion string           `json:"new_version,omitempty"`
+	Changelog  []ChangelogEntry `json:"changelog"`
+}
+
+// ContainerChangelogResponse is the JSON body of
+// GET /api/v1/containers/{id}/changelog.
+type ContainerChangelogResponse struct {
+	ImageRef       string                    `json:"image_ref"`
+	CurrentVersion string                    `json:"current_version"`
+	Entries        []ChangelogEntry          `json:"entries"`
+	Update         *ContainerChangelogUpdate `json:"update"`
+}
+
+// HandleContainerChangelog returns the release history for the image
+// the container is running, plus whether an update is available and
+// the changelog for that newer version.
 func HandleContainerChangelog(ctx context.Context, db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -101,27 +124,79 @@ func HandleContainerChangelog(ctx context.Context, db *sql.DB) http.HandlerFunc 
 			http.Error(w, "container id required", http.StatusBadRequest)
 			return
 		}
-		var imageRef string
+		var imageRef, serverID string
 		if err := db.QueryRowContext(r.Context(),
-			`SELECT image_ref FROM containers WHERE id = ?`, containerID).Scan(&imageRef); err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"image_ref": "", "entries": []ChangelogEntry{}})
+			`SELECT image_ref, server_id FROM containers WHERE id = ?`, containerID).Scan(&imageRef, &serverID); err != nil {
+			writeJSON(w, http.StatusOK, ContainerChangelogResponse{
+				Entries: []ChangelogEntry{},
+				Update:  &ContainerChangelogUpdate{Changelog: []ChangelogEntry{}},
+			})
 			return
 		}
 		repo, tag, ok := splitRepoTag(imageRef)
 		if !ok {
-			writeJSON(w, http.StatusOK, map[string]any{"image_ref": imageRef, "entries": []ChangelogEntry{}})
+			writeJSON(w, http.StatusOK, ContainerChangelogResponse{
+				ImageRef:       imageRef,
+				CurrentVersion: imageRef,
+				Entries:        []ChangelogEntry{},
+				Update:         &ContainerChangelogUpdate{Changelog: []ChangelogEntry{}},
+			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"image_ref": imageRef,
-			"entries":   listChangelog(r.Context(), db, repo, tag, 20),
+
+		entries := listChangelog(r.Context(), db, repo, tag, 50)
+		update := &ContainerChangelogUpdate{Changelog: []ChangelogEntry{}}
+
+		// Digest delta: the agent reported the running tag moved.
+		var fromDigest, toDigest, status sql.NullString
+		if err := db.QueryRowContext(r.Context(), `
+			SELECT u.from_digest, u.to_digest, u.status
+			FROM updates u
+			JOIN images i ON i.id = u.image_id
+			WHERE i.repo = ? AND i.tag = ? AND u.server_id = ?
+		`, repo, tag, serverID).Scan(&fromDigest, &toDigest, &status); err == nil && status.Valid && status.String != "applied" {
+			update.Available = true
+			update.FromDigest = fromDigest.String
+			update.ToDigest = toDigest.String
+			update.Status = status.String
+		}
+
+		// Newer-version heuristic: entries published after the running
+		// version are the "new" changelog shown above the current one.
+		if idx := indexOfVersion(entries, tag); idx > 0 {
+			update.Available = true
+			update.NewVersion = entries[0].Version
+			update.Changelog = entries[:idx]
+		}
+
+		writeJSON(w, http.StatusOK, ContainerChangelogResponse{
+			ImageRef:       imageRef,
+			CurrentVersion: tag,
+			Entries:        entries,
+			Update:         update,
 		})
 	}
 }
 
+// indexOfVersion returns the position of the entry whose version
+// matches tag (leading "v" ignored, case-insensitive), or -1.
+func indexOfVersion(entries []ChangelogEntry, tag string) int {
+	want := normalizeVersion(tag)
+	for i, e := range entries {
+		if normalizeVersion(e.Version) == want {
+			return i
+		}
+	}
+	return -1
+}
+
+func normalizeVersion(s string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "v"))
+}
+
 func listChangelog(ctx context.Context, db *sql.DB, repo, tag string, limit int) []ChangelogEntry {
 	rows, err := db.QueryContext(ctx, `
-		SELECT e.version, e.title, e.url, e.published_at, e.source
+		SELECT e.version, e.title, e.url, e.published_at, e.source, e.body
 		FROM changelog_entries e
 		JOIN images i ON i.id = e.image_id
 		WHERE i.repo = ? AND i.tag = ?
@@ -136,8 +211,8 @@ func listChangelog(ctx context.Context, db *sql.DB, repo, tag string, limit int)
 	var out []ChangelogEntry
 	for rows.Next() {
 		var e ChangelogEntry
-		var title, url, published sql.NullString
-		if err := rows.Scan(&e.Version, &title, &url, &published, &e.Source); err != nil {
+		var title, url, published, body sql.NullString
+		if err := rows.Scan(&e.Version, &title, &url, &published, &e.Source, &body); err != nil {
 			continue
 		}
 		if title.Valid {
@@ -148,6 +223,9 @@ func listChangelog(ctx context.Context, db *sql.DB, repo, tag string, limit int)
 		}
 		if published.Valid {
 			e.PublishedAt = published.String
+		}
+		if body.Valid {
+			e.Body = body.String
 		}
 		out = append(out, e)
 	}

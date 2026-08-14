@@ -133,6 +133,22 @@ export interface ChangelogEntry {
 	hash?: string;
 }
 
+export interface ContainerUpdate {
+	available: boolean;
+	from_digest?: string;
+	to_digest?: string;
+	status?: string;
+	new_version?: string;
+	changelog: ChangelogEntry[];
+}
+
+export interface ContainerChangelog {
+	image_ref: string;
+	current_version: string;
+	entries: ChangelogEntry[];
+	update: ContainerUpdate | null;
+}
+
 export interface UpdateListItem {
 	id: string;
 	image_ref: string;
@@ -176,7 +192,7 @@ export const api = {
 		}>('/api/v1/admin/agents/enroll-token', { method: 'POST', body, auth: true }),
 	listUpdates: () => request<{ updates: UpdateListItem[] }>('/api/v1/updates'),
 	listContainerChangelog: (containerId: string) =>
-		request<{ image_ref: string; entries: ChangelogEntry[] }>(
+		request<ContainerChangelog>(
 			`/api/v1/containers/${encodeURIComponent(containerId)}/changelog`
 		)
 };
