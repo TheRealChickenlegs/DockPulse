@@ -53,8 +53,9 @@ Each image may have multiple candidate changelog sources, tried in order:
 
 1. **OCI image labels** (`org.opencontainers.image.source`, `org.opencontainers.image.url`). **implemented** for `github.com/...` repos.
 2. **GitHub Releases API** for `github.com/...` repos. **implemented** — fetch host is hardcoded to `api.github.com` (SSRF-bounded, see THREAT_MODEL T15).
-3. **GitLab Releases API** for `gitlab.com/...` repos. planned.
-4. **Generic scrape** (Atom/RSS at common paths, configurable regex) — opt-in. planned.
-5. **Manual override** — admins can pin a changelog URL per image. planned.
+3. **Registry tag list** (Docker Hub). **implemented** — when no label points at a supported source, the agent lists the image's published tags (`hub.docker.com`, hardcoded) and shows them as version history (name + last-updated date). This is what makes `nginx:latest` and other plain images show current + previous versions.
+4. **GitLab Releases API** for `gitlab.com/...` repos. planned.
+5. **Generic scrape** (Atom/RSS at common paths, configurable regex) — opt-in. planned.
+6. **Manual override** — admins can pin a changelog URL per image. planned.
 
 Deduplication is by `(image_id, version, hash)` so the same release note is never stored twice even if multiple sources report it.

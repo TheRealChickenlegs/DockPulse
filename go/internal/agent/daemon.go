@@ -86,6 +86,11 @@ type Daemon struct {
 	// images' OCI labels point at.
 	changelogFetcher *changelog.Fetcher
 
+	// tagLister overrides the registry tag-list provider used for the
+	// release-history fallback (test seam). When nil, the provider is
+	// built from registry.New per image.
+	tagLister registry.TagLister
+
 	// lastReported tracks the last remote digest reported to the
 	// controller per repo:tag so an unchanged registry isn't
 	// re-reported (and its changelog re-fetched) on every poll.
@@ -384,6 +389,7 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 	type changelogTarget struct {
 		imageRef string
 		imageID  string
+		ref      registry.Ref
 	}
 	var seen map[string]target
 	changelogSeen := map[string]changelogTarget{}
@@ -394,7 +400,7 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 		}
 		key := ref.String()
 		if _, ok := changelogSeen[key]; !ok {
-			changelogSeen[key] = changelogTarget{imageRef: key, imageID: c.ImageID}
+			changelogSeen[key] = changelogTarget{imageRef: key, imageID: c.ImageID, ref: ref}
 		}
 		if c.State != "running" {
 			continue
@@ -450,7 +456,14 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 	}
 
 	for _, t := range changelogSeen {
-		if entries := d.fetchChangelog(ctx, t.imageID, t.imageRef); len(entries) > 0 {
+		entries := d.fetchChangelog(ctx, t.imageID, t.imageRef)
+		if len(entries) == 0 {
+			// No changelog source (or none produced entries): fall
+			// back to the registry's published tags so the UI still
+			// shows current and previous versions.
+			entries = d.fetchTagHistory(ctx, t.ref, t.imageRef)
+		}
+		if len(entries) > 0 {
 			uploads = append(uploads, changelogUpload{imageRef: t.imageRef, entries: entries})
 		}
 	}
@@ -502,6 +515,43 @@ func (d *Daemon) fetchChangelog(ctx context.Context, imageID, imageRef string) [
 		return nil
 	}
 	return entries
+}
+
+// fetchTagHistory lists an image's published tags from its registry
+// and converts them into release-history entries. It is the fallback
+// for images without a changelog source; only registries that expose
+// a TagLister (Docker Hub today) produce history.
+func (d *Daemon) fetchTagHistory(ctx context.Context, ref registry.Ref, imageRef string) []changelog.Entry {
+	lister := d.tagLister
+	if lister == nil {
+		provider, err := registry.New(ref.String(), d.registryCreds)
+		if err != nil {
+			return nil
+		}
+		lister, _ = provider.(registry.TagLister)
+	}
+	if lister == nil {
+		return nil
+	}
+	tags, err := lister.ListTags(ctx, ref.Repo, 5)
+	if err != nil {
+		d.Log.Warn("tag list", "image", imageRef, "err", err)
+		return nil
+	}
+	out := make([]changelog.Entry, 0, len(tags))
+	for _, t := range tags {
+		if t.Name == "" {
+			continue
+		}
+		out = append(out, changelog.Entry{
+			Version:     t.Name,
+			Source:      changelog.SourceRegistry,
+			Title:       t.Name,
+			PublishedAt: t.LastUpdated,
+			Hash:        changelog.Hash(t.Name, ""),
+		})
+	}
+	return out
 }
 
 func (d *Daemon) sendUpdatesReport(ctx context.Context, updates []reportUpdate) error {

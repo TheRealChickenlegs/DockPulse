@@ -96,7 +96,7 @@ A compromised or malicious registry (or an attacker who can push to a tag the ag
 
 **Mitigation:**
 - Registry responses are parsed leniently as plain data (digest strings, media types) and never executed; only the `repo:tag → digest` mapping is stored.
-- Changelog fetches are SSRF-bounded: the fetch host is hardcoded to `api.github.com` in code and is not operator-configurable, so a poisoned image label (`org.opencontainers.image.source`) cannot point the agent at an arbitrary internal address.
+- Changelog fetches are SSRF-bounded: the fetch hosts are hardcoded to `api.github.com` (release notes) and `hub.docker.com` (tag list) in code and are not operator-configurable, so a poisoned image label (`org.opencontainers.image.source`) cannot point the agent at an arbitrary internal address.
 - Changelog entries are deduplicated by `(image_id, version, hash)` and rendered as text; URLs are sanitized (`bluemonday`) before being emitted to the UI.
 - The digest comparison is advisory only (Phase 2); applying an update is a distinct, user-authorized action (Phase 6, see T11).
 - Agent→controller reports carry the same HMAC+nonce envelope as every other payload (T6/T7), so a poisoned agent cannot forge reports for other hosts.

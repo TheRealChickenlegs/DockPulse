@@ -14,6 +14,7 @@ import (
 
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/changelog"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/docker"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/registry"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
 )
 
@@ -291,6 +292,103 @@ func TestPollRegistryUploadsChangelogWithoutUpdate(t *testing.T) {
 	if githubHits != 1 {
 		t.Errorf("github fetched %d times after second poll, want 1", githubHits)
 	}
+}
+
+func TestPollRegistryTagHistoryFallback(t *testing.T) {
+	fakeDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/containers/json":
+			_ = json.NewEncoder(w).Encode([]docker.Container{{
+				ID:      "c1",
+				Names:   []string{"/web"},
+				Image:   "ghcr.io/user/app:latest",
+				ImageID: "sha256:local",
+				State:   "running",
+				Labels:  map[string]string{},
+			}})
+		case r.URL.Path == "/images/sha256:local/json":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":     "sha256:local",
+				"Config": map[string]any{"Labels": map[string]string{}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fakeDocker.Close()
+	dockerClient, err := docker.New(fakeDocker.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var uploads int
+	var uploadedRef string
+	var uploadedSources []string
+	fakeController := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/agent/v1/changelog/upload":
+			uploads++
+			var body struct {
+				ImageRef string `json:"image_ref"`
+				Entries  []struct {
+					Version string `json:"version"`
+					Source  string `json:"source"`
+				} `json:"entries"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			uploadedRef = body.ImageRef
+			for _, e := range body.Entries {
+				uploadedSources = append(uploadedSources, e.Source)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "inserted": len(body.Entries)})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fakeController.Close()
+
+	d := &Daemon{
+		Log:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Docker:             dockerClient,
+		baseURL:            fakeController.URL,
+		httpClient:         fakeController.Client(),
+		changelogFetcher:   changelog.NewFetcherWithBase("http://unused"),
+		tagLister:          fakeTagLister{},
+		lastReported:       map[string]string{},
+		lastChangelogFetch: map[string]time.Time{},
+	}
+
+	if err := d.pollRegistry(context.Background()); err != nil {
+		t.Fatalf("pollRegistry: %v", err)
+	}
+
+	if uploads != 1 {
+		t.Fatalf("changelog/upload called %d times, want 1", uploads)
+	}
+	if uploadedRef != "user/app:latest" {
+		t.Errorf("uploaded image_ref = %q, want user/app:latest", uploadedRef)
+	}
+	for _, s := range uploadedSources {
+		if s != changelog.SourceRegistry {
+			t.Errorf("entry source = %q, want %q", s, changelog.SourceRegistry)
+		}
+	}
+	if len(uploadedSources) != 3 {
+		t.Errorf("uploaded %d entries, want 3", len(uploadedSources))
+	}
+}
+
+type fakeTagLister struct{}
+
+func (fakeTagLister) ListTags(_ context.Context, repo string, limit int) ([]registry.Tag, error) {
+	if repo != "user/app" {
+		return nil, nil
+	}
+	return []registry.Tag{
+		{Name: "latest", LastUpdated: "2026-08-01T00:00:00Z"},
+		{Name: "1.28.0", LastUpdated: "2026-07-01T00:00:00Z"},
+		{Name: "1.27.3", LastUpdated: "2026-06-01T00:00:00Z"},
+	}, nil
 }
 
 func TestRunCreatesDataDir(t *testing.T) {

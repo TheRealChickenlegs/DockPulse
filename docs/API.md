@@ -28,7 +28,7 @@ Base URL: `https://<your-host>`
 | POST | `/agent/v1/heartbeat` | mTLS + signed | Agent liveness + Docker info. |
 | POST | `/agent/v1/containers/snapshot` | mTLS + signed | Container state batch. |
 | POST | `/agent/v1/updates/report` | mTLS + signed | Detected `(image, local digest, remote digest)` deltas. |
-| POST | `/agent/v1/changelog/upload` | mTLS + signed | Changelog entries for images with a digest delta. |
+| POST | `/agent/v1/changelog/upload` | mTLS + signed | Changelog entries for an image (release notes and/or registry tag history). |
 
 The following endpoints are planned but **not yet implemented**:
 

@@ -114,7 +114,7 @@ type ChangelogEntry struct {
 }
 
 var changelogSources = map[string]bool{
-	"oci_label": true, "github": true, "gitlab": true, "scrape": true, "manual": true,
+	"oci_label": true, "github": true, "gitlab": true, "scrape": true, "manual": true, "registry": true,
 }
 
 // HandleChangelogUpload attaches release notes to an image. Entries

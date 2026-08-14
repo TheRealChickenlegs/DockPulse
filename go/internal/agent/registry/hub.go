@@ -16,6 +16,7 @@ const (
 	defaultHubTokenURL    = "https://auth.docker.io/token"
 	defaultHubRegistryURL = "https://registry-1.docker.io"
 	defaultHubService     = "registry.docker.io"
+	defaultHubTagsURL     = "https://hub.docker.com"
 )
 
 // hub is the Docker Hub v2 registry provider. Docker Hub requires a
@@ -30,6 +31,9 @@ type hub struct {
 	tokenURL    string
 	registryURL string
 	service     string
+	// tagsURL is the Docker Hub web API base used to enumerate an
+	// image's published tags (release-history fallback).
+	tagsURL string
 	// username and password authenticate the token exchange. When both
 	// are empty the exchange is anonymous.
 	username string
@@ -50,6 +54,7 @@ func NewHub(cred *Credential) Provider {
 		tokenURL:    defaultHubTokenURL,
 		registryURL: defaultHubRegistryURL,
 		service:     defaultHubService,
+		tagsURL:     defaultHubTagsURL,
 	}
 	if cred != nil {
 		h.username = cred.Username
@@ -96,6 +101,55 @@ func (h *hub) ResolveDigest(ctx context.Context, repo, tag string) (string, erro
 		return "", fmt.Errorf("registry: manifest %s:%s response missing Docker-Content-Digest", repo, tag)
 	}
 	return digest, nil
+}
+
+// hubTagsResponse is the subset of Docker Hub's tag-list response the
+// agent needs (name + last_updated). Docker Hub already returns tags
+// newest-first when ordering=last_updated.
+type hubTagsResponse struct {
+	Results []hubTag `json:"results"`
+}
+
+type hubTag struct {
+	Name        string `json:"name"`
+	LastUpdated string `json:"last_updated"`
+}
+
+// ListTags returns up to limit published tags for repo from the
+// Docker Hub web API, most recently updated first. The host is the
+// hardcoded hub.docker.com (SSRF-bounded, T15); the repo path is
+// escaped per segment.
+func (h *hub) ListTags(ctx context.Context, repo string, limit int) ([]Tag, error) {
+	u := h.tagsURL + "/v2/repositories/" + pathEscape(repo) + "/tags/?page_size=100&ordering=last_updated"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("registry: list tags for %s: %w", repo, err)
+	}
+	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("registry: list tags for %s status %d: %s", repo, resp.StatusCode, truncate(string(body), 256))
+	}
+	var tr hubTagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return nil, fmt.Errorf("registry: decode tags for %s: %w", repo, err)
+	}
+	out := make([]Tag, 0, len(tr.Results))
+	for _, t := range tr.Results {
+		if t.Name == "" {
+			continue
+		}
+		out = append(out, Tag{Name: t.Name, LastUpdated: t.LastUpdated})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (h *hub) token(ctx context.Context, repo string) (string, error) {

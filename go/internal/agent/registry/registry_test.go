@@ -180,6 +180,54 @@ func TestLoadCredentialDirErrors(t *testing.T) {
 	}
 }
 
+func TestHubListTags(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/repositories/library/nginx/tags/" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(hubTagsResponse{
+			Results: []hubTag{
+				{Name: "latest", LastUpdated: "2026-08-01T00:00:00Z"},
+				{Name: "1.28.0", LastUpdated: "2026-07-01T00:00:00Z"},
+				{Name: "1.27.3", LastUpdated: "2026-06-01T00:00:00Z"},
+				{Name: "1.26.2", LastUpdated: "2026-05-01T00:00:00Z"},
+				{Name: "1.26.1", LastUpdated: "2026-04-01T00:00:00Z"},
+				{Name: "1.26.0", LastUpdated: "2026-03-01T00:00:00Z"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	h := &hub{client: srv.Client(), tagsURL: srv.URL}
+
+	tags, err := h.ListTags(context.Background(), "library/nginx", 5)
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	if len(tags) != 5 {
+		t.Fatalf("ListTags returned %d tags, want 5", len(tags))
+	}
+	if tags[0].Name != "latest" {
+		t.Errorf("first tag = %q, want latest", tags[0].Name)
+	}
+	if tags[4].Name != "1.26.1" {
+		t.Errorf("last tag = %q, want 1.26.1", tags[4].Name)
+	}
+}
+
+func TestHubListTagsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	h := &hub{client: srv.Client(), tagsURL: srv.URL}
+	if _, err := h.ListTags(context.Background(), "library/nginx", 5); err == nil {
+		t.Fatal("expected error for non-200 tag list")
+	}
+}
+
 func TestHubResolveDigest(t *testing.T) {
 	var tokenSeen bool
 	var repoForToken string

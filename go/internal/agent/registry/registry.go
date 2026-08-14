@@ -27,6 +27,21 @@ type Provider interface {
 	ResolveDigest(ctx context.Context, repo, tag string) (string, error)
 }
 
+// Tag is a single published tag on a registry.
+type Tag struct {
+	Name        string
+	LastUpdated string
+}
+
+// TagLister is implemented by providers that can enumerate an image's
+// published tags. It backs the release-history fallback for images
+// that carry no changelog source (see changelog.SourceRegistry).
+type TagLister interface {
+	// ListTags returns up to limit tags for repo, most recently
+	// published first.
+	ListTags(ctx context.Context, repo string, limit int) ([]Tag, error)
+}
+
 // New returns the provider for the given fully-qualified image
 // reference, or ErrUnsupported when no provider is implemented for
 // its registry host. A digest-pinned reference (no tag) is not

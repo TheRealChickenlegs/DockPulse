@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: Phases 0–1 complete; Phase 2 (update detection + changelog) in progress. Implemented: mode dispatch, logging, config, embedded SvelteKit SPA, session auth (Argon2id), CSRF, enrollment + mTLS, container inventory, and — for the Docker Hub registry — digest polling, OCI-label/GitHub-release changelog fetch, and the corresponding agent + frontend API endpoints.
+> Status: Phases 0–1 complete; Phase 2 (update detection + changelog) in progress. Implemented: mode dispatch, logging, config, embedded SvelteKit SPA, session auth (Argon2id), CSRF, enrollment + mTLS, container inventory, and — for the Docker Hub registry — digest polling, OCI-label/GitHub-release changelog fetch with a registry tag-list fallback, and the corresponding agent + frontend API endpoints.
 
 ## Topology
 
@@ -68,7 +68,7 @@ An optional `docker-compose.with-caddy.yml` is provided for users who don't alre
 
 - Discovers running containers via the local Docker daemon (through the socket-proxy).
 - Periodically resolves the remote digest for each unique `(repo, tag)` using the pluggable registry provider.
-- Fetches changelog source metadata for any image with a digest delta.
+- Fetches release history for every image it hosts: GitHub Releases when the image's OCI labels point at a supported repo, otherwise the image's Docker Hub tag list as a version-history fallback.
 - Signs and uploads batches to the controller over mTLS.
 
 ### Shared library

@@ -28,6 +28,11 @@ const (
 	LabelURL    = "org.opencontainers.image.url"
 
 	githubAPIBase = "https://api.github.com"
+
+	// SourceRegistry marks entries synthesized from a registry's tag
+	// list. It is the release-history fallback for images that carry
+	// no changelog source label (see registry.TagLister).
+	SourceRegistry = "registry"
 )
 
 // Source describes one changelog source for an image.
