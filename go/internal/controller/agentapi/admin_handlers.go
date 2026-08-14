@@ -161,15 +161,32 @@ func HandleListServers(ctx context.Context, db *sql.DB) http.HandlerFunc {
 
 // ContainerListItem is the JSON shape of GET /api/v1/servers/{id}/containers.
 type ContainerListItem struct {
-	ID        string `json:"id"`
-	DockerID  string `json:"docker_id"`
-	Name      string `json:"name"`
-	ImageRef  string `json:"image_ref"`
+	ID         string  `json:"id"`
+	DockerID   string  `json:"docker_id"`
+	Name       string  `json:"name"`
+	ImageRef   string  `json:"image_ref"`
 	ImageDigest string `json:"image_digest_local"`
-	State     string `json:"state"`
-	StartedAt *string `json:"started_at"`
-	ServerID  string `json:"server_id"`
-	UpdatedAt string `json:"updated_at"`
+	State      string  `json:"state"`
+	Stack      string  `json:"stack"`
+	StartedAt  *string `json:"started_at"`
+	ServerID   string  `json:"server_id"`
+	UpdatedAt  string  `json:"updated_at"`
+}
+
+// composeProjectLabel is the label Docker Compose sets on every
+// container it manages; it identifies the stack the container belongs
+// to. Containers without it are not part of a stack.
+const composeProjectLabel = "com.docker.compose.project"
+
+// containerStack extracts the Docker Compose stack name from a
+// container's stored labels JSON. Empty means the container is not
+// managed by a stack.
+func containerStack(labelsJSON string) string {
+	var labels map[string]string
+	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
+		return ""
+	}
+	return labels[composeProjectLabel]
 }
 
 // HandleListContainers returns the cached containers for a server.
@@ -186,7 +203,7 @@ func HandleListContainers(ctx context.Context, db *sql.DB) http.HandlerFunc {
 		}
 		rows, err := db.QueryContext(r.Context(), `
 			SELECT id, docker_id, name, image_ref, COALESCE(image_digest_local, ''),
-			       state, started_at, server_id, updated_at
+			       state, started_at, server_id, updated_at, COALESCE(labels_json, '{}')
 			FROM containers WHERE server_id = ?
 			ORDER BY name
 		`, serverID)
@@ -200,10 +217,12 @@ func HandleListContainers(ctx context.Context, db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var c ContainerListItem
 			var started sql.NullString
-			if err := rows.Scan(&c.ID, &c.DockerID, &c.Name, &c.ImageRef, &c.ImageDigest, &c.State, &started, &c.ServerID, &c.UpdatedAt); err != nil {
+			var labelsJSON string
+			if err := rows.Scan(&c.ID, &c.DockerID, &c.Name, &c.ImageRef, &c.ImageDigest, &c.State, &started, &c.ServerID, &c.UpdatedAt, &labelsJSON); err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
+			c.Stack = containerStack(labelsJSON)
 			if started.Valid {
 				c.StartedAt = &started.String
 			}

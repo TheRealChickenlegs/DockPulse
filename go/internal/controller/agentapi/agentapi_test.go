@@ -211,7 +211,7 @@ func TestListServersAndContainers(t *testing.T) {
 	agentID, serverID := enroll(t, s, tok, "server-e", ca.Fingerprint())
 
 	body, _ := json.Marshal(ContainerSnapshotRequest{Containers: []Container{
-		{DockerID: "a", Name: "web", ImageRef: "nginx:1.25", State: "running"},
+		{DockerID: "a", Name: "web", ImageRef: "nginx:1.25", State: "running", Labels: map[string]string{"com.docker.compose.project": "frontend"}},
 		{DockerID: "b", Name: "db", ImageRef: "postgres:16", State: "running"},
 	}})
 	r := httptest.NewRequest(http.MethodPost, "/agent/v1/containers/snapshot", bytes.NewReader(body))
@@ -254,6 +254,10 @@ func TestListServersAndContainers(t *testing.T) {
 	}
 	if len(lc.Containers) != 2 {
 		t.Fatalf("expected 2 containers, got %d", len(lc.Containers))
+	}
+	// ORDER BY name: db (no stack) then web (stack "frontend").
+	if lc.Containers[0].Stack != "" || lc.Containers[1].Stack != "frontend" {
+		t.Fatalf("stacks = %q, %q; want empty, frontend", lc.Containers[0].Stack, lc.Containers[1].Stack)
 	}
 }
 

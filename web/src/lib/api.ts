@@ -117,6 +117,7 @@ export interface ContainerListItem {
 	image_ref: string;
 	image_digest_local: string;
 	state: string;
+	stack?: string;
 	started_at?: string;
 	server_id: string;
 	updated_at: string;

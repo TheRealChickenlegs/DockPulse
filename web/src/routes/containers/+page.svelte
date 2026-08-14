@@ -15,6 +15,39 @@
 	let loadingChangelog = $state(false);
 	let changelogError: string | null = $state(null);
 	let scanning = $state(false);
+	let collapsed = $state(new Set<string>());
+
+	// Containers grouped by their Docker Compose stack
+	// (com.docker.compose.project). Containers outside any stack share
+	// a trailing "Other" group so nothing is lost.
+	type Group = { key: string; label: string; containers: ContainerListItem[] };
+	const groups = $derived(groupContainers(containers));
+
+	function groupContainers(list: ContainerListItem[]): Group[] {
+		const byStack: Record<string, ContainerListItem[]> = {};
+		for (const c of list) {
+			const key = c.stack?.trim() || '';
+			const arr = byStack[key];
+			if (arr) arr.push(c);
+			else byStack[key] = [c];
+		}
+		const out = Object.entries(byStack)
+			.filter(([key]) => key !== '')
+			.sort((a, b) => a[0].localeCompare(b[0]))
+			.map(([key, cs]) => ({ key, label: key, containers: cs }));
+		const others = byStack[''];
+		if (others?.length) out.push({ key: '', label: 'Other', containers: others });
+		return out;
+	}
+
+	function groupRunning(g: Group) {
+		return g.containers.filter((c) => c.state === 'running').length;
+	}
+
+	function toggleGroup(key: string) {
+		if (collapsed.has(key)) collapsed.delete(key);
+		else collapsed.add(key);
+	}
 
 	async function loadServers() {
 		loadingServers = true;
@@ -186,18 +219,34 @@
 		{:else if containers.length === 0}
 			<p class="muted">No containers cached for this server yet. Hit “Scan now” to fetch them immediately.</p>
 		{:else}
-			<div class="grid">
-				{#each containers as c (c.id)}
-					<button type="button" class="card" onclick={() => open(c)}>
-						<header>
-							<span class="dot" style="background:{stateColor(c.state)}"></span>
-							<span class="name">{c.name}</span>
-						</header>
-						<code class="image">{c.image_ref}</code>
-						<div class="state">{c.state}</div>
+			{#each groups as group (group.key)}
+				<section class="group" class:collapsed={collapsed.has(group.key)}>
+					<button
+						type="button"
+						class="group-head"
+						aria-expanded={!collapsed.has(group.key)}
+						onclick={() => toggleGroup(group.key)}
+					>
+						<span class="chevron" aria-hidden="true"></span>
+						<span class="group-name">{group.label}</span>
+						<span class="group-count">{groupRunning(group)}/{group.containers.length}</span>
 					</button>
-				{/each}
-			</div>
+					{#if !collapsed.has(group.key)}
+						<div class="grid">
+							{#each group.containers as c (c.id)}
+								<button type="button" class="card" onclick={() => open(c)}>
+									<header>
+										<span class="dot" style="background:{stateColor(c.state)}"></span>
+										<span class="name">{c.name}</span>
+									</header>
+									<code class="image">{c.image_ref}</code>
+									<div class="state">{c.state}</div>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</section>
+			{/each}
 		{/if}
 	</section>
 </section>
@@ -359,6 +408,48 @@
 	.scan:disabled {
 		opacity: 0.6;
 		cursor: default;
+	}
+	.group {
+		margin-bottom: 1.2rem;
+	}
+	.group-head {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		width: 100%;
+		padding: 0.5rem 0.7rem;
+		margin-bottom: 0.8rem;
+		background: var(--bg-1);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-md);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+		text-align: left;
+	}
+	.group-head:hover {
+		border-color: rgba(129, 140, 248, 0.5);
+	}
+	.chevron {
+		width: 8px;
+		height: 8px;
+		border-right: 2px solid var(--fg-1);
+		border-bottom: 2px solid var(--fg-1);
+		transform: rotate(-45deg);
+		transition: transform 160ms ease;
+		flex-shrink: 0;
+	}
+	.group:not(.collapsed) .chevron {
+		transform: rotate(45deg);
+	}
+	.group-name {
+		font-weight: 600;
+	}
+	.group-count {
+		margin-left: auto;
+		font-family: var(--font-mono);
+		font-size: 0.78rem;
+		color: var(--fg-1);
 	}
 	.grid {
 		display: grid;
