@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
 	import { api, type ServerListItem, type ContainerListItem, type ChangelogEntry } from '$lib/api';
@@ -15,7 +16,7 @@
 	let loadingChangelog = $state(false);
 	let changelogError: string | null = $state(null);
 	let scanning = $state(false);
-	let collapsed = $state(new Set<string>());
+	let collapsed = new SvelteSet<string>();
 
 	// Containers grouped by their Docker Compose stack
 	// (com.docker.compose.project). Containers outside any stack share

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import { api, type ServerListItem } from '$lib/api';
 	import { session } from '$lib/stores';
@@ -7,7 +8,7 @@
 	let servers: ServerListItem[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
-	let scanning: Set<string> = $state(new Set());
+	let scanning = new SvelteSet<string>();
 
 	async function refresh() {
 		loading = true;
