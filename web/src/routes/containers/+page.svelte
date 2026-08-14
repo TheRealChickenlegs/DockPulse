@@ -49,6 +49,18 @@
 		else collapsed.add(key);
 	}
 
+	// runningVersion reports whether a release entry corresponds to the
+	// tag the container is running (normalized: leading "v" ignored,
+	// case-insensitive). Tags that don't map to an exact release (e.g.
+	// "latest") simply never match.
+	function runningVersion(tag: string, version: string) {
+		const norm = (s: string) => s.replace(/^v/i, '').toLowerCase();
+		return norm(tag) === norm(version);
+	}
+	function currentTag(ref: string) {
+		return ref.includes(':') ? ref.split(':').pop() ?? '' : '';
+	}
+
 	async function loadServers() {
 		loadingServers = true;
 		error = null;
@@ -275,18 +287,21 @@
 			<dt>Updated</dt>
 			<dd>{new Date(selected.updated_at).toLocaleString()}</dd>
 		</dl>
-		<h3 class="changelog-title">Changelog</h3>
+		<h3 class="changelog-title">Release history</h3>
 		{#if loadingChangelog}
 			<p class="muted">Loading…</p>
 		{:else if changelogError}
 			<p class="muted changelog-error">{changelogError}</p>
 		{:else if changelog.length === 0}
-			<p class="muted">No changelog entries for this image yet.</p>
+			<p class="muted">No release history for this image yet. The agent fetches the latest releases on the next scan.</p>
 		{:else}
 			<ul class="changelog">
 				{#each changelog as e (e.version + e.url)}
 					<li>
 						<span class="version">{e.title ?? e.version}</span>
+						{#if runningVersion(currentTag(selected.image_ref), e.version)}
+							<span class="tag current">running</span>
+						{/if}
 						<span class="muted">{e.published_at ? new Date(e.published_at).toLocaleDateString() : ''}</span>
 						{#if e.url}
 							<a href={e.url} rel="external noopener noreferrer" target="_blank" class="link">release →</a>
@@ -582,6 +597,18 @@
 	}
 	.changelog .version {
 		font-weight: 600;
+	}
+	.tag {
+		font-size: 0.66rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 0.05rem 0.45rem;
+		border-radius: 999px;
+		white-space: nowrap;
+	}
+	.tag.current {
+		color: var(--ok);
+		border: 1px solid rgba(74, 222, 128, 0.4);
 	}
 	.link {
 		margin-left: auto;

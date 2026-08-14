@@ -2,11 +2,18 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/changelog"
+	"github.com/TheRealChickenlegs/DockPulse/go/internal/agent/docker"
 	"github.com/TheRealChickenlegs/DockPulse/go/internal/config"
 )
 
@@ -126,15 +133,163 @@ func TestValidateRejectsHTTPForPublicHosts(t *testing.T) {
 
 func TestValidateAllowsInsecureControllerOverride(t *testing.T) {
 	cfg := config.Agent{
-		Common:                 config.Common{Mode: config.ModeAgent},
-		Name:                   "x",
-		ControllerURL:          "http://dockpulse.example.com",
+		Common:                  config.Common{Mode: config.ModeAgent},
+		Name:                    "x",
+		ControllerURL:           "http://dockpulse.example.com",
 		AllowInsecureController: true,
-		DockerHost:             "unix:///var/run/docker.sock",
-		DataDir:                t.TempDir(),
+		DockerHost:              "unix:///var/run/docker.sock",
+		DataDir:                 t.TempDir(),
 	}
 	if err := validate(cfg); err != nil {
 		t.Fatalf("with --allow-insecure-controller, expected no error: %v", err)
+	}
+}
+
+func TestFetchChangelogCooldown(t *testing.T) {
+	unreachable, err := docker.New("tcp://127.0.0.1:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{
+		Log:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Docker:             unreachable,
+		lastChangelogFetch: map[string]time.Time{},
+	}
+	const ref = "library/nginx:latest"
+
+	// Within the cooldown window the fetch is skipped entirely, so no
+	// Docker call is made.
+	d.lastChangelogFetch[ref] = time.Now()
+	if got := d.fetchChangelog(context.Background(), "imgid", ref); got != nil {
+		t.Fatalf("expected nil inside cooldown, got %d entries", len(got))
+	}
+
+	// Fresh ref: the attempt is recorded, then the Docker call fails
+	// fast against the unreachable engine and returns nil.
+	d.lastChangelogFetch = map[string]time.Time{}
+	if got := d.fetchChangelog(context.Background(), "imgid", ref); got != nil {
+		t.Fatalf("expected nil on inspect failure, got %d entries", len(got))
+	}
+
+	// The failed attempt still armed the cooldown, so an immediate
+	// retry is skipped without touching Docker again.
+	before := len(d.lastChangelogFetch)
+	if got := d.fetchChangelog(context.Background(), "imgid", ref); got != nil {
+		t.Fatalf("expected nil on immediate retry, got %d entries", len(got))
+	}
+	if len(d.lastChangelogFetch) != before {
+		t.Fatal("cooldown map changed on a skipped fetch")
+	}
+}
+
+func TestPollRegistryUploadsChangelogWithoutUpdate(t *testing.T) {
+	// Fake Docker: one running container whose image has an OCI
+	// changelog label but lives on a registry with no provider, so
+	// the registry resolve is skipped entirely and only the changelog
+	// path runs.
+	fakeDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/containers/json":
+			_ = json.NewEncoder(w).Encode([]docker.Container{{
+				ID:      "c1",
+				Names:   []string{"/web"},
+				Image:   "ghcr.io/user/app:latest",
+				ImageID: "sha256:local",
+				State:   "running",
+				Labels:  map[string]string{"com.docker.compose.project": "apps"},
+			}})
+		case r.URL.Path == "/images/sha256:local/json":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id": "sha256:local",
+				"Config": map[string]any{
+					"Labels": map[string]string{"org.opencontainers.image.source": "https://github.com/nginx/nginx"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fakeDocker.Close()
+	dockerClient, err := docker.New(fakeDocker.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fake GitHub: two releases for nginx/nginx.
+	var githubHits int
+	fakeGitHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		githubHits++
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"tag_name": "1.28.0", "name": "1.28.0", "html_url": "https://github.com/nginx/nginx/releases/tag/1.28.0", "published_at": "2026-07-01T00:00:00Z"},
+			{"tag_name": "1.27.3", "name": "1.27.3", "html_url": "https://github.com/nginx/nginx/releases/tag/1.27.3", "published_at": "2026-06-01T00:00:00Z"},
+		})
+	}))
+	defer fakeGitHub.Close()
+
+	// Fake controller: record which agent endpoints get hit.
+	var uploads, reports int
+	var uploadedEntries int
+	fakeController := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/agent/v1/changelog/upload":
+			uploads++
+			var body struct {
+				ImageRef string `json:"image_ref"`
+				Entries  []struct {
+					Version string `json:"version"`
+				} `json:"entries"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			uploadedEntries = len(body.Entries)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "inserted": len(body.Entries)})
+		case "/agent/v1/updates/report":
+			reports++
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "count": 0})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fakeController.Close()
+
+	d := &Daemon{
+		Log:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Docker:             dockerClient,
+		baseURL:            fakeController.URL,
+		httpClient:         fakeController.Client(),
+		changelogFetcher:   changelog.NewFetcherWithBase(fakeGitHub.URL),
+		lastReported:       map[string]string{},
+		lastChangelogFetch: map[string]time.Time{},
+	}
+
+	ctx := context.Background()
+	if err := d.pollRegistry(ctx); err != nil {
+		t.Fatalf("pollRegistry: %v", err)
+	}
+
+	// No update is reported (unsupported registry), but the release
+	// history is uploaded anyway.
+	if reports != 0 {
+		t.Errorf("updates/report called %d times, want 0", reports)
+	}
+	if uploads != 1 {
+		t.Fatalf("changelog/upload called %d times, want 1", uploads)
+	}
+	if uploadedEntries != 2 {
+		t.Errorf("uploaded %d entries, want 2", uploadedEntries)
+	}
+	if githubHits != 1 {
+		t.Errorf("github fetched %d times, want 1", githubHits)
+	}
+
+	// The cooldown keeps a second poll quiet: no re-fetch, no upload.
+	if err := d.pollRegistry(ctx); err != nil {
+		t.Fatalf("pollRegistry (2nd): %v", err)
+	}
+	if uploads != 1 {
+		t.Errorf("changelog/upload called %d times after second poll, want 1", uploads)
+	}
+	if githubHits != 1 {
+		t.Errorf("github fetched %d times after second poll, want 1", githubHits)
 	}
 }
 

@@ -92,6 +92,13 @@ type Daemon struct {
 	muReported   sync.Mutex
 	lastReported map[string]string
 
+	// lastChangelogFetch throttles release-note fetches per image ref
+	// so on-demand scans can't trip the unauthenticated GitHub API
+	// rate limit. The release history in the controller still serves
+	// the last uploaded entries during the cooldown window.
+	muChangelog        sync.Mutex
+	lastChangelogFetch map[string]time.Time
+
 	// registryCreds is the optional set of registry credentials (one
 	// per registry host, e.g. a Docker Hub PAT) used to authenticate
 	// pulls. Loaded once at startup from --registry-credentials-dir.
@@ -126,13 +133,14 @@ func Run(ctx context.Context, cfg config.Agent) error {
 	}
 
 	d := &Daemon{
-		Cfg:              cfg,
-		Log:              logger,
-		Docker:           dockerClient,
-		baseURL:          strings.TrimRight(cfg.ControllerURL, "/"),
-		changelogFetcher: changelog.NewFetcher(),
-		lastReported:     map[string]string{},
-		registryCreds:    registryCreds,
+		Cfg:                cfg,
+		Log:                logger,
+		Docker:             dockerClient,
+		baseURL:            strings.TrimRight(cfg.ControllerURL, "/"),
+		changelogFetcher:   changelog.NewFetcher(),
+		lastReported:       map[string]string{},
+		lastChangelogFetch: map[string]time.Time{},
+		registryCreds:      registryCreds,
 	}
 	// Pre-enrollment client: no client cert yet, and /agent/v1/enroll
 	// is the one endpoint the controller accepts without mTLS.
@@ -358,6 +366,9 @@ type reportUpdate struct {
 // Images on unsupported registries and digest-pinned images are
 // skipped. A remote digest already reported for a ref is not
 // re-reported, so an unchanged registry stays quiet between polls.
+// Release-note history is fetched for every image the host has,
+// regardless of update state, so the UI can show the current and
+// previous versions of a container even when nothing is pending.
 func (d *Daemon) pollRegistry(ctx context.Context) error {
 	containers, err := d.Docker.ListContainers(ctx)
 	if err != nil {
@@ -370,22 +381,33 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 		localDigest string
 		imageID     string
 	}
-	seen := map[string]target{}
+	type changelogTarget struct {
+		imageRef string
+		imageID  string
+	}
+	var seen map[string]target
+	changelogSeen := map[string]changelogTarget{}
 	for _, c := range containers {
-		if c.State != "running" {
-			continue
-		}
 		ref, err := registry.Parse(c.Image)
 		if err != nil || ref.Digest != "" {
 			continue
 		}
 		key := ref.String()
+		if _, ok := changelogSeen[key]; !ok {
+			changelogSeen[key] = changelogTarget{imageRef: key, imageID: c.ImageID}
+		}
+		if c.State != "running" {
+			continue
+		}
+		if seen == nil {
+			seen = map[string]target{}
+		}
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = target{ref: ref, imageRef: c.Image, localDigest: c.ImageID, imageID: c.ImageID}
 	}
-	if len(seen) == 0 {
+	if len(seen) == 0 && len(changelogSeen) == 0 {
 		return nil
 	}
 
@@ -425,16 +447,18 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 			FromDigest: t.localDigest,
 			ToDigest:   remote,
 		})
+	}
+
+	for _, t := range changelogSeen {
 		if entries := d.fetchChangelog(ctx, t.imageID, t.imageRef); len(entries) > 0 {
-			uploads = append(uploads, changelogUpload{imageRef: t.ref.String(), entries: entries})
+			uploads = append(uploads, changelogUpload{imageRef: t.imageRef, entries: entries})
 		}
 	}
 
-	if len(updates) == 0 {
-		return nil
-	}
-	if err := d.sendUpdatesReport(ctx, updates); err != nil {
-		return err
+	if len(updates) > 0 {
+		if err := d.sendUpdatesReport(ctx, updates); err != nil {
+			return err
+		}
 	}
 	for _, u := range uploads {
 		if err := d.sendChangelogUpload(ctx, u.imageRef, u.entries); err != nil {
@@ -444,10 +468,25 @@ func (d *Daemon) pollRegistry(ctx context.Context) error {
 	return nil
 }
 
+// changelogFetchCooldown is how long the agent skips re-fetching
+// release notes for an image after a fetch attempt. The controller
+// keeps serving the last uploaded history during the window, so this
+// only protects the unauthenticated GitHub API rate limit.
+const changelogFetchCooldown = time.Hour
+
 // fetchChangelog inspects the local image's OCI labels for changelog
 // source hints and fetches release notes from those sources. It
-// returns nil when the image exposes no supported source.
+// returns nil when the image exposes no supported source or the
+// source was fetched within the cooldown window.
 func (d *Daemon) fetchChangelog(ctx context.Context, imageID, imageRef string) []changelog.Entry {
+	d.muChangelog.Lock()
+	if last, ok := d.lastChangelogFetch[imageRef]; ok && time.Since(last) < changelogFetchCooldown {
+		d.muChangelog.Unlock()
+		return nil
+	}
+	d.lastChangelogFetch[imageRef] = time.Now()
+	d.muChangelog.Unlock()
+
 	img, err := d.Docker.ImageInspect(ctx, imageID)
 	if err != nil {
 		d.Log.Warn("image inspect", "image", imageID, "err", err)
