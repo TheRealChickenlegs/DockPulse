@@ -63,7 +63,7 @@ jobs:
       # cosign — GHCR has no OCI Referrers API, so cosign stored
       # signatures as cluttering sha256-<digest>.sig tags).
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/therealchickenlegs/dockpulse
           subject-digest: ${{ steps.build.outputs.digest }}
